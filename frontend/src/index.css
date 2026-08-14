@@ -459,11 +459,17 @@ a:hover { color: var(--copper); }
   color: inherit;
 }
 
+.ddi-heading {
+  font-family: var(--serif);
+  font-size: 20px;
+  margin: 20px 0 10px;
+}
+
 .tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 18px 0 12px;
+  margin: 0 0 12px;
 }
 
 .tabs button {

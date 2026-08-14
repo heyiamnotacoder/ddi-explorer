@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 import { checkInteractions, type CheckResponse, type PairResult } from "./api";
 
-type Filter = "all" | "flagged" | "timing" | "none";
+type Filter = "all" | "flagged" | "timing";
+
+function isDdi(p: PairResult) {
+  return p.category === "contraindicated" || p.category === "timing" || p.grade != null;
+}
 
 const VIA: Record<string, string> = {
   indian_dataset: "Indian brand index",
@@ -86,7 +90,7 @@ function PairCard({ p }: { p: PairResult }) {
 
 function PairMatrix({ components, pairs }: { components: string[]; pairs: PairResult[] }) {
   if (components.length < 2) return null;
-  const map = new Map(pairs.map((p) => [pairKey(p.drugs[0], p.drugs[1]), p]));
+  const map = new Map(pairs.filter(isDdi).map((p) => [pairKey(p.drugs[0], p.drugs[1]), p]));
   return (
     <div className="matrix-wrap">
       <table className="matrix">
@@ -167,26 +171,24 @@ export default function App() {
     ? (components.length * (components.length - 1)) / 2
     : 0;
 
-  const sorted = useMemo(() => {
+  const ddiPairs = useMemo(() => {
     if (!result) return [];
-    return [...result.pairs].sort((a, b) => rank(a) - rank(b));
+    return result.pairs.filter(isDdi).sort((a, b) => rank(a) - rank(b));
   }, [result]);
 
   const counts = useMemo(() => {
-    const c = { flagged: 0, timing: 0, none: 0 };
-    for (const p of sorted) {
+    const c = { flagged: 0, timing: 0 };
+    for (const p of ddiPairs) {
       if (p.category === "timing") c.timing += 1;
-      else if (p.category === "none" && !p.grade) c.none += 1;
       else c.flagged += 1;
     }
     return c;
-  }, [sorted]);
+  }, [ddiPairs]);
 
-  const visible = sorted.filter((p) => {
-    if (filter === "all") return true;
+  const visible = ddiPairs.filter((p) => {
     if (filter === "timing") return p.category === "timing";
-    if (filter === "none") return p.category === "none" && !p.grade;
-    return !(p.category === "none" && !p.grade) && p.category !== "timing";
+    if (filter === "flagged") return p.category !== "timing";
+    return true;
   });
 
   const fdcs = result?.normalized_drugs.filter((d) => d.components.length > 1) ?? [];
@@ -330,9 +332,10 @@ export default function App() {
                 {" → "}
                 <b>{components.length} component{components.length === 1 ? "" : "s"}</b>
                 {" → "}
-                <b>{result.pairs.length} pair{result.pairs.length === 1 ? "" : "s"} checked</b>
+                <b>{ddiPairs.length} DDI{ddiPairs.length === 1 ? "" : "s"}</b>
+                {` of ${result.pairs.length} pair${result.pairs.length === 1 ? "" : "s"} checked`}
                 {expectedPairs > 0 && result.pairs.length === expectedPairs
-                  ? ` · C(${components.length}, 2) = ${expectedPairs}`
+                  ? ` · C(${components.length}, 2)`
                   : null}
               </p>
             </div>
@@ -379,21 +382,27 @@ export default function App() {
             </div>
           )}
 
-          <div className="tabs" role="tablist">
-            {([
-              ["all", `All pairs (${sorted.length})`],
-              ["flagged", `Interactions (${counts.flagged})`],
-              ["timing", `Timing-manageable (${counts.timing})`],
-              ["none", `No DDI (${counts.none})`],
-            ] as const).map(([id, label]) => (
-              <button key={id} className={filter === id ? "on" : ""} onClick={() => setFilter(id)} type="button">
-                {label}
+          {ddiPairs.length > 0 && (
+            <h3 className="ddi-heading">DDI pairs ({ddiPairs.length})</h3>
+          )}
+          {ddiPairs.length > 0 && counts.timing > 0 && (
+            <div className="tabs" role="tablist">
+              <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")} type="button">
+                All DDIs ({ddiPairs.length})
               </button>
-            ))}
-          </div>
+              <button className={filter === "flagged" ? "on" : ""} onClick={() => setFilter("flagged")} type="button">
+                Interactions ({counts.flagged})
+              </button>
+              <button className={filter === "timing" ? "on" : ""} onClick={() => setFilter("timing")} type="button">
+                Timing-manageable ({counts.timing})
+              </button>
+            </div>
+          )}
 
           {visible.map((p, i) => <PairCard key={i} p={p} />)}
-          {visible.length === 0 && <p className="empty-pairs">Nothing in this filter.</p>}
+          {visible.length === 0 && (
+            <p className="empty-pairs">No drug–drug interaction found among the checked pairs.</p>
+          )}
 
           <details className="audit">
             <summary>What the model saw (de-identified input)</summary>
