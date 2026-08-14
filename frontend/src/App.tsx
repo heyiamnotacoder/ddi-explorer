@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
-import { checkInteractions, type CheckResponse, type PairResult } from "./api";
+import {
+  checkInteractions,
+  suggestAlternatives,
+  type AlternativesResponse,
+  type AlternativeSuggestion,
+  type CheckResponse,
+  type Importance,
+  type PairResult,
+} from "./api";
 
 type Filter = "all" | "flagged" | "timing";
 
@@ -47,6 +55,52 @@ function GradePill({ grade, category }: { grade: string | null; category?: strin
   if (grade === "B") return <span className="pill B">B</span>;
   if (grade === "C") return <span className="pill C">C</span>;
   return <span className="pill none">NONE</span>;
+}
+
+const IMP_LABEL: Record<Importance, string> = {
+  adjuvant: "symptomatic",
+  controller: "disease-modifying",
+  anchor: "do not stop casually",
+};
+
+function SuggestionCard({ s }: { s: AlternativeSuggestion }) {
+  return (
+    <article className={`alt-card ${s.safer ? "safer" : "not-safer"}`}>
+      <div className="alt-swap">
+        <div>
+          <p className="alt-k">Change</p>
+          <h4>{s.change_from} → {s.change_to}</h4>
+          <p className="alt-prod">On the list as {s.change_from_product}</p>
+        </div>
+        {s.safer
+          ? <span className="pill A">SAFER</span>
+          : <span className="pill none">NOT SAFER</span>}
+      </div>
+      {s.indication && <p><em>Indication.</em> {s.indication}</p>}
+      {s.rationale && <p>{s.rationale}</p>}
+      {s.adr_note && (
+        <p className="alt-adr"><em>ADR / disease risk.</em> {s.adr_note}</p>
+      )}
+      {s.reject_reason && <p className="alt-reject">{s.reject_reason}</p>}
+      {s.remaining_ddis.length > 0 && (
+        <div className="alt-recheck">
+          <strong>Recheck vs the rest of the list</strong>
+          <ul>
+            {s.remaining_ddis.map((p, i) => (
+              <li key={i}>
+                {p.drugs[0]} + {p.drugs[1]}{" "}
+                <GradePill grade={p.grade} category={p.category} />
+                {p.summary ? ` — ${p.summary}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {s.safer && s.remaining_ddis.length === 0 && (
+        <p className="alt-clear">No leftover DDI with the remaining medicines.</p>
+      )}
+    </article>
+  );
 }
 
 function PairCard({ p }: { p: PairResult }) {
@@ -136,6 +190,9 @@ export default function App() {
   const [result, setResult] = useState<CheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [altLoading, setAltLoading] = useState(false);
+  const [alt, setAlt] = useState<AlternativesResponse | null>(null);
+  const [altError, setAltError] = useState<string | null>(null);
 
   const onFiles = (files: FileList | null) => {
     if (!files) return;
@@ -151,6 +208,8 @@ export default function App() {
     setError(null);
     setResult(null);
     setFilter("all");
+    setAlt(null);
+    setAltError(null);
     try {
       const res = await checkInteractions({
         text: text || undefined,
@@ -163,6 +222,27 @@ export default function App() {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runAlternatives = async () => {
+    if (!result) return;
+    setAltLoading(true);
+    setAltError(null);
+    setAlt(null);
+    try {
+      const res = await suggestAlternatives({
+        normalized_drugs: result.normalized_drugs,
+        pairs: result.pairs,
+        patient_context: patient || undefined,
+        scrubbed_text: result.scrubbed_text,
+        avoid_with_medications: result.avoid_with_medications,
+      });
+      setAlt(res);
+    } catch (e) {
+      setAltError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setAltLoading(false);
     }
   };
 
@@ -402,6 +482,77 @@ export default function App() {
           {visible.map((p, i) => <PairCard key={i} p={p} />)}
           {visible.length === 0 && (
             <p className="empty-pairs">No drug–drug interaction found among the checked pairs.</p>
+          )}
+
+          {ddiPairs.length > 0 && (
+            <section className="alt-panel panel panel-pad" aria-live="polite">
+              <p className="kicker">Whole-prescription substitution</p>
+              <h3>Which medicine can change</h3>
+              <p className="alt-intro">
+                A second pass over every flagged pair. It prefers changing a
+                symptomatic or lower-stakes drug so the disease-modifying or
+                high-ADR-risk medicine stays. Grade C pairs (weak evidence) are
+                not a reason to change a medicine. Proposed substitutes are
+                rechecked against the rest of this list.
+              </p>
+              <button
+                type="button"
+                className="alt-run"
+                onClick={runAlternatives}
+                disabled={altLoading}
+                aria-busy={altLoading}
+              >
+                {altLoading ? "Ranking and rechecking…" : "Suggest safer alternatives"}
+              </button>
+              {altLoading && (
+                <p className="hint">
+                  Ranking replaceable medicines, proposing same-indication
+                  alternatives, then grading each candidate against the leftover list.
+                  This is another evidence loop — often 20–40 seconds.
+                </p>
+              )}
+              {altError && <div className="error" role="alert">{altError}</div>}
+              {alt && (
+                <div className="alt-out">
+                  <p className="alt-strategy">{alt.strategy}</p>
+                  {alt.timing_first.length > 0 && (
+                    <div className="alt-timing">
+                      <strong>Separate administration first</strong>
+                      <ul>{alt.timing_first.map((t, i) => <li key={i}>{t}</li>)}</ul>
+                    </div>
+                  )}
+                  {alt.replaceable.length > 0 && (
+                    <div className="alt-tags">
+                      {alt.replaceable.map((d) => (
+                        <span className={`imp imp-${d.importance}`} key={d.name}>
+                          Change {d.name}
+                          <small>{IMP_LABEL[d.importance]}</small>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {alt.keep.length > 0 && (
+                    <div className="alt-keep">
+                      <strong>Keep</strong>
+                      <ul>
+                        {alt.keep.map((d) => (
+                          <li key={d.name}>
+                            <b>{d.name}</b> ({IMP_LABEL[d.importance]}) — {d.why_this_one}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {alt.suggestions.map((s, i) => <SuggestionCard key={i} s={s} />)}
+                  {alt.suggestions.length === 0 && !altLoading && (
+                    <p className="empty-pairs">
+                      No substitute cleared the rest of this list. Use the ranking
+                      above and a clinical pharmacist if a change is still needed.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
           )}
 
           <details className="audit">

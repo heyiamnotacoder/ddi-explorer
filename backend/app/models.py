@@ -63,3 +63,48 @@ class CheckResponse(BaseModel):
     avoid_with_medications: list[str]        # alcohol/tobacco/herbal notes
     insufficient_evidence: list[tuple[str, str]]
     disclaimer: str
+
+
+class Importance(str, Enum):
+    ANCHOR = "anchor"          # withdrawal can worsen serious disease / high-ADR
+    CONTROLLER = "controller"  # chronic disease-modifying; change only if needed
+    ADJUVANT = "adjuvant"      # symptomatic / PRN — prefer changing these
+
+
+class AlternativesRequest(BaseModel):
+    """Second loop: whole-prescription substitution, not a per-pair lookup."""
+    normalized_drugs: list[NormalizedDrug]
+    pairs: list[PairResult]
+    patient_context: str | None = None
+    scrubbed_text: str | None = None  # already de-identified /api/check input
+    avoid_with_medications: list[str] = Field(default_factory=list)
+
+
+class ReplaceableDrug(BaseModel):
+    name: str
+    input_name: str
+    importance: Importance
+    why_this_one: str
+    involved_pairs: list[tuple[str, str]] = Field(default_factory=list)
+
+
+class AlternativeSuggestion(BaseModel):
+    change_from: str
+    change_from_product: str
+    change_to: str
+    change_to_components: list[str] = Field(default_factory=list)
+    indication: str = ""
+    rationale: str = ""
+    adr_note: str = ""
+    safer: bool = False
+    reject_reason: str | None = None
+    remaining_ddis: list[PairResult] = Field(default_factory=list)
+
+
+class AlternativesResponse(BaseModel):
+    strategy: str
+    replaceable: list[ReplaceableDrug] = Field(default_factory=list)
+    suggestions: list[AlternativeSuggestion] = Field(default_factory=list)
+    keep: list[ReplaceableDrug] = Field(default_factory=list)
+    timing_first: list[str] = Field(default_factory=list)
+    disclaimer: str

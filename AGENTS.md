@@ -22,6 +22,9 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
    - unknown pairs via an early-exit evidence waterfall
 6. Assemble results: contraindication banner, timing-manageable pairs,
    “avoid with medications”, patient-specific notes, citations, disclaimer.
+7. Optional second loop (button): rank which interacting drug is safest to
+   change (prefer symptomatic / lower-ADR over disease-modifying), propose
+   same-indication substitutes, recheck each vs the rest of the list.
 
 ---
 
@@ -51,14 +54,15 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │   └── agent/            LLM + evidence tools
 │   │       ├── llm.py        litellm adapter
 │   │       ├── extract.py    first LLM call (drugs from scrubbed text)
+│   │       ├── alternatives.py  second loop: which drug to change
 │   │       ├── tools.py      openFDA, PubMed, CT.gov, Firecrawl
 │   │       └── waterfall.py  per-pair A→B→C early exit
 │   ├── scripts/fetch_indian_dataset.py
-│   └── tests/                pytest (offline: normalize + scrubber)
+│   └── tests/                pytest (offline: normalize + scrubber + alternatives)
 └── frontend/                 React 19 + Vite 8 + TypeScript
     └── src/
         ├── App.tsx           single-screen UI
-        └── api.ts            POST /api/check
+        └── api.ts            POST /api/check, /api/alternatives
 ```
 
 No auth, no database. Backend is stateless. Any history would be
@@ -103,6 +107,9 @@ RxNav pre-filter        known pairs → Grade A (source_tier="local")
 waterfall               unknown pairs only, early exit
         ▼
 assemble                banner, avoid-with, insufficient, disclaimer
+        ▼
+[button] alternatives   rank replaceable drug → propose substitutes
+                        → recheck vs leftover list (prefilter + waterfall)
 ```
 
 ### 1. OCR — `pipeline/ocr.py`
@@ -181,6 +188,29 @@ the whole request (`source_tier="error"`).
 Non-drugs (alcohol, tobacco, grapefruit, herbals) skip pair-checking and land
 in `avoid_with_medications`.
 
+### 7. Alternatives — `agent/alternatives.py` + `POST /api/alternatives`
+
+Optional. Does not run until the clinician clicks **Suggest safer alternatives**
+under the pair results. Input is the already-graded list (plus patient notes,
+scrubbed again).
+
+1. Deterministic importance: `adjuvant` (symptomatic/PRN) > `controller`
+   (chronic disease-modifying) > `anchor` (withdrawal can worsen disease or
+   cause a serious ADR). Unknown names default to `controller`.
+2. Only drugs in a Grade A, Grade B, or contraindicated pair are change
+   candidates. Grade C (case reports / weak evidence) never justifies a swap.
+   Timing pairs recommend separation, not a swap.
+3. Adjuvants are always eligible. Controllers only if the pair is major or
+   contraindicated. Anchors only if every partner is also an anchor.
+4. LLM proposes ≤2 same-indication substitutes per candidate. It may not
+   invent citations or change a drug the ranker rejected.
+5. Each substitute is normalized and rechecked only against leftover
+   components. A suggestion is `safer` only if it does not introduce a
+   contraindication and the leftover interaction burden drops.
+
+The button sits under the pair cards. Empty suggestions still show the
+ranking so the clinician knows *which* medicine is lower-stakes.
+
 ---
 
 ## Evidence grades
@@ -202,6 +232,7 @@ Defined in `backend/app/main.py` and `models.py`.
 |---|---|---|
 | `GET` | `/api/health` | `{status, tesseract}` |
 | `POST` | `/api/check` | Full pipeline |
+| `POST` | `/api/alternatives` | Second loop: which drug to change |
 | `POST` | `/api/ocr` | Image → scrubbed text (UI preview) |
 
 `CheckRequest`: `{ text?, images[]?, patient_context?, timing? }`
@@ -210,6 +241,13 @@ Defined in `backend/app/main.py` and `models.py`.
 `CheckResponse`: `scrubbed_text`, `normalized_drugs`, `unresolved_drugs`,
 `pairs`, `contraindicated_banner`, `avoid_with_medications`,
 `insufficient_evidence`, `disclaimer`.
+
+`AlternativesRequest`: `{ normalized_drugs, pairs, patient_context?, avoid_with_medications? }`
+(the graded `/api/check` snapshot).
+
+`AlternativesResponse`: `strategy`, `replaceable`, `suggestions`
+(`change_from` → `change_to`, `safer`, leftover `remaining_ddis`),
+`keep`, `timing_first`, `disclaimer`.
 
 Frontend: one screen in `frontend/src/App.tsx`. Submit disabled until there is
 text or an image. Results sort contraindicated → A → B → C. CORS allows
@@ -289,8 +327,11 @@ tier). Do not treat that latency as a hang.
 `backend/tests/test_scrubber.py` — PHI gone, clinical context kept, brands not
 redacted, `1-0-1` / relative time survive.
 
-When changing scrub or normalize, extend these tests. Do not add tests that
-need live API keys.
+`backend/tests/test_alternatives.py` — importance ranking, adjuvant preferred
+over anchor, timing is not a swap, safer() rejects a new contraindication.
+
+When changing scrub, normalize, or ranking, extend these tests. Do not add
+tests that need live API keys.
 
 Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may
 see a raw image today; its transcript is still scrubbed.

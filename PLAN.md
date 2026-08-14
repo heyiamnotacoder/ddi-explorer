@@ -147,11 +147,19 @@ POST /api/check
       insufficient_evidence: [...] }
 
 POST /api/ocr          (standalone image → scrubbed text, for UI preview)
+POST /api/alternatives (second loop: which drug to change)
+  body: { normalized_drugs, pairs, patient_context?, avoid_with_medications? }
+  → { strategy, replaceable[], suggestions[{change_from, change_to, safer,
+      remaining_ddis[]}], keep[], timing_first[], disclaimer }
 GET  /api/health
 ```
 
 Frontend pages: single main screen (input → results), matrix view for
 multi-drug, distinct styling for contraindicated / timing / insufficient.
+A **Suggest safer alternatives** button under the pair results runs the
+second loop: change the lowest-importance interacting drug (adjuvant
+before controller before anchor); timing pairs stay on a schedule.
+Grade C pairs never justify a substitution.
 
 ---
 

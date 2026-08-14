@@ -53,3 +53,51 @@ export async function checkInteractions(body: {
   if (!r.ok) throw new Error(`API error ${r.status}`);
   return r.json();
 }
+
+export type Importance = "anchor" | "controller" | "adjuvant";
+
+export interface ReplaceableDrug {
+  name: string;
+  input_name: string;
+  importance: Importance;
+  why_this_one: string;
+  involved_pairs: [string, string][];
+}
+
+export interface AlternativeSuggestion {
+  change_from: string;
+  change_from_product: string;
+  change_to: string;
+  change_to_components: string[];
+  indication: string;
+  rationale: string;
+  adr_note: string;
+  safer: boolean;
+  reject_reason?: string | null;
+  remaining_ddis: PairResult[];
+}
+
+export interface AlternativesResponse {
+  strategy: string;
+  replaceable: ReplaceableDrug[];
+  suggestions: AlternativeSuggestion[];
+  keep: ReplaceableDrug[];
+  timing_first: string[];
+  disclaimer: string;
+}
+
+export async function suggestAlternatives(body: {
+  normalized_drugs: NormalizedDrug[];
+  pairs: PairResult[];
+  patient_context?: string;
+  scrubbed_text?: string;
+  avoid_with_medications?: string[];
+}): Promise<AlternativesResponse> {
+  const r = await fetch("/api/alternatives", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`API error ${r.status}`);
+  return r.json();
+}

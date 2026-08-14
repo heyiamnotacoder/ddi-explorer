@@ -560,6 +560,127 @@ a:hover { color: var(--copper); }
 
 .empty-pairs { color: var(--muted); }
 
+/* ----- alternatives (second loop) ----- */
+.alt-panel { margin: 18px 0 8px; }
+
+.alt-panel h3 {
+  font-family: var(--serif);
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+
+.alt-intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.alt-run {
+  background: transparent;
+  color: var(--forest);
+  border: 1.5px solid var(--forest);
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.alt-run:hover { background: var(--forest); color: #f4efe3; }
+.alt-run:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.alt-out { margin-top: 14px; }
+
+.alt-strategy {
+  font-family: var(--serif);
+  font-size: 16.5px;
+  margin: 0 0 12px;
+}
+
+.alt-timing, .alt-keep {
+  font-size: 13.5px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.alt-timing { background: #eef4fb; border: 1px solid #b9cce4; }
+.alt-keep { background: #fffdf7; border: 1px solid var(--line); }
+.alt-timing ul, .alt-keep ul { margin: 6px 0 0; padding-left: 18px; }
+
+.alt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.imp {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.imp small {
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: none;
+  opacity: 0.8;
+}
+
+.imp-adjuvant { background: #e4f2ea; color: var(--grade-a); }
+.imp-controller { background: #f8edd4; color: var(--warn); }
+.imp-anchor { background: #fde8e4; color: var(--contra); }
+
+.alt-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  background: #fffdf7;
+}
+
+.alt-card.safer { border-color: #9cc9b0; background: #f3faf6; }
+.alt-card.not-safer { opacity: 0.92; }
+
+.alt-swap {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.alt-k {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--copper);
+}
+
+.alt-swap h4 {
+  margin: 2px 0 0;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.alt-prod { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.alt-card p { margin: 8px 0 0; font-size: 14px; }
+.alt-adr { color: var(--warn); }
+.alt-reject { color: var(--grade-c); }
+.alt-clear { color: var(--grade-a); font-size: 13.5px; }
+
+.alt-recheck { margin-top: 8px; font-size: 13.5px; }
+.alt-recheck ul { margin: 4px 0 0; padding-left: 18px; }
+.alt-recheck .pill { margin-left: 4px; vertical-align: middle; }
+
 .sr-only {
   position: absolute;
   width: 1px;
