@@ -137,13 +137,17 @@ Keep strength on the name (`Telma 40`, `Dolo 650`) — brand resolution needs it
 
 Per name, cap `MAX_DRUGS_PER_REQUEST` (default 15):
 
-1. Indian dataset exact → prefix → fuzzy (rapidfuzz ≥ 88), prefer fewer
-   components so a plain brand does not become an FDC.
+1. Indian dataset exact → word-bounded prefix (not `dolo`→`dolonex`) →
+   known generic (so `amlodipine` stays a single ingredient) → fuzzy
+   (rapidfuzz ≥ 88). Prefer fewer components so a plain brand does not
+   become an FDC; unspecified form prefers tablet/capsule over drops.
 2. Else RxNav `/approximateTerm` → RxCUI + RxNorm name.
 3. Else mark unresolved.
 
 `split_components` turns `amoxycillin (500mg) / clavulanic acid (125mg)` into
-`["amoxycillin", "clavulanic acid"]`. Every component pair is checked.
+`["amoxycillin", "clavulanic acid"]`. Strengths like `(100mg/ml)` are stripped
+before the `/` split so `ml` is never a component. Every *component* pair
+across different input drugs is checked — an FDC therefore adds pairs.
 
 ### 5. Pre-filter — `pipeline/prefilter.py`
 

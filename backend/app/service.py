@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from .agent import extract, waterfall
-from .models import Category, CheckRequest, CheckResponse
+from .models import Category, CheckRequest, CheckResponse, Grade, PairResult
 from .pipeline import normalize as norm
 from .pipeline import ocr, prefilter, scrubber
 
@@ -22,6 +22,22 @@ DISCLAIMER = (
     "It does not replace clinical judgment or approved prescribing "
     "information. Verify critical decisions against primary sources."
 )
+
+
+def _dedupe_pairs(pairs: list[PairResult]) -> list[PairResult]:
+    """Keep one result per unordered component pair; prefer a stronger grade."""
+    rank = {Grade.A: 0, Grade.B: 1, Grade.C: 2, None: 3}
+    best: dict[tuple[str, str], PairResult] = {}
+    order: list[tuple[str, str]] = []
+    for p in pairs:
+        key = tuple(sorted(p.drugs))
+        if key not in best:
+            best[key] = p
+            order.append(key)
+            continue
+        if rank.get(p.grade, 3) < rank.get(best[key].grade, 3):
+            best[key] = p
+    return [best[k] for k in order]
 
 
 async def run_check(req: CheckRequest) -> CheckResponse:
@@ -61,8 +77,8 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     # 6) Agent waterfall for unknown pairs only
     agent_results = await waterfall.evaluate_pairs(unknown_pairs, patient_ctx)
 
-    # 7) Assemble
-    all_pairs = known_results + agent_results
+    # 7) Assemble (dedupe in case RxNav names and waterfall names collide)
+    all_pairs = _dedupe_pairs(known_results + agent_results)
     banner = [p for p in all_pairs if p.category == Category.CONTRAINDICATED]
     insufficient = [p.drugs for p in all_pairs if p.source_tier == "insufficient"]
 

@@ -23,6 +23,7 @@ export interface PairResult {
 export interface NormalizedDrug {
   input_name: string;
   generic_name?: string | null;
+  rxcui?: string | null;
   components: string[];
   resolved_via?: string | null;
 }

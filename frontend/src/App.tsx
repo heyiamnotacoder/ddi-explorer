@@ -1,53 +1,124 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { checkInteractions, type CheckResponse, type PairResult } from "./api";
 
-const GRADE_STYLE: Record<string, { bg: string; label: string }> = {
-  A: { bg: "#16a34a", label: "A — Approved labeling" },
-  B: { bg: "#d97706", label: "B — Trial literature" },
-  C: { bg: "#dc2626", label: "C — Weak evidence" },
-  none: { bg: "#6b7280", label: "No DDI found" },
+type Filter = "all" | "flagged" | "timing" | "none";
+
+const VIA: Record<string, string> = {
+  indian_dataset: "Indian brand index",
+  rxnav: "RxNorm",
 };
 
-function GradeBadge({ grade }: { grade: string | null }) {
-  const s = GRADE_STYLE[grade ?? "none"];
-  return (
-    <span style={{ background: s.bg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontWeight: 700, fontSize: 13 }}>
-      {s.label}
-    </span>
-  );
+function uniqueComponents(result: CheckResponse): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of result.normalized_drugs) {
+    for (const c of d.components) {
+      const k = c.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(c);
+      }
+    }
+  }
+  return out;
+}
+
+function pairKey(a: string, b: string) {
+  return [a.toLowerCase(), b.toLowerCase()].sort().join("|");
+}
+
+function rank(p: PairResult) {
+  if (p.category === "contraindicated") return 0;
+  if (p.grade === "A") return 1;
+  if (p.grade === "B") return 2;
+  if (p.grade === "C") return 3;
+  if (p.category === "timing") return 4;
+  return 5;
+}
+
+function GradePill({ grade, category }: { grade: string | null; category?: string }) {
+  if (category === "contraindicated") return <span className="pill contra">CONTRA</span>;
+  if (category === "timing") return <span className="pill timing">TIMING</span>;
+  if (grade === "A") return <span className="pill A">A</span>;
+  if (grade === "B") return <span className="pill B">B</span>;
+  if (grade === "C") return <span className="pill C">C</span>;
+  return <span className="pill none">NONE</span>;
 }
 
 function PairCard({ p }: { p: PairResult }) {
   return (
-    <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, marginBottom: 12, background: p.category === "contraindicated" ? "#fef2f2" : p.category === "timing" ? "#eff6ff" : "#fff" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: 16 }}>{p.drugs[0]} + {p.drugs[1]}</strong>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {p.severity && <span style={{ fontSize: 12, color: "#6b7280" }}>severity: {p.severity}</span>}
-          {p.category === "timing" && <span style={{ fontSize: 12, background: "#2563eb", color: "#fff", borderRadius: 6, padding: "2px 8px" }}>manageable by timing</span>}
-          <GradeBadge grade={p.grade} />
+    <article id={`pair-${pairKey(p.drugs[0], p.drugs[1])}`} className={`pair ${p.category}`}>
+      <div className="pair-top">
+        <h4>{p.drugs[0]} + {p.drugs[1]}</h4>
+        <div className="pair-meta">
+          {p.severity && <span className="sev">{p.severity}</span>}
+          <GradePill grade={p.grade} category={p.category} />
         </div>
       </div>
-      <p style={{ margin: "8px 0 4px" }}>{p.summary}</p>
-      {p.mechanism && <p style={{ margin: "4px 0", fontSize: 13, color: "#4b5563" }}><em>Mechanism:</em> {p.mechanism}</p>}
-      {p.dose_condition && <p style={{ margin: "4px 0", fontSize: 13, color: "#92400e" }}>⚖ {p.dose_condition}</p>}
-      {p.patient_specific_note && <p style={{ margin: "4px 0", fontSize: 13, color: "#7c3aed" }}>👤 For this patient: {p.patient_specific_note}</p>}
-      {p.evidence_conflict && <p style={{ margin: "4px 0", fontSize: 13, color: "#b45309" }}>⚠ Conflicting evidence: {p.evidence_conflict}</p>}
+      <p>{p.summary}</p>
+      {p.mechanism && <p className="mech"><em>Mechanism.</em> {p.mechanism}</p>}
+      {p.dose_condition && <p className="dose">{p.dose_condition}</p>}
+      {p.patient_specific_note && <p className="pt">For this patient: {p.patient_specific_note}</p>}
+      {p.evidence_conflict && <p className="conflict">Conflicting evidence: {p.evidence_conflict}</p>}
       {p.severe_if.length > 0 && (
-        <div style={{ margin: "6px 0", fontSize: 13 }}>
-          <strong>DDI will be severe if:</strong>
-          <ul style={{ margin: "4px 0" }}>{p.severe_if.map((s, i) => <li key={i}>{s}</li>)}</ul>
+        <div className="severe">
+          <strong>More severe if</strong>
+          <ul>{p.severe_if.map((s, i) => <li key={i}>{s}</li>)}</ul>
         </div>
       )}
       {p.citations.length > 0 && (
-        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-          Sources: {p.citations.map((c, i) => (
-            <span key={i} style={{ marginRight: 10 }}>
-              {c.url ? <a href={c.url} target="_blank" rel="noreferrer">[{c.source}{c.identifier ? ` ${c.identifier}` : ""}]</a> : `[${c.source}${c.identifier ? ` ${c.identifier}` : ""}]`}
-            </span>
-          ))}
+        <div className="cites">
+          Sources:{" "}
+          {p.citations.map((c, i) =>
+            c.url ? (
+              <a key={i} href={c.url} target="_blank" rel="noreferrer">
+                [{c.source}{c.identifier ? ` ${c.identifier}` : ""}]
+              </a>
+            ) : (
+              <span key={i}>[{c.source}{c.identifier ? ` ${c.identifier}` : ""}]</span>
+            ),
+          )}
         </div>
       )}
+    </article>
+  );
+}
+
+function PairMatrix({ components, pairs }: { components: string[]; pairs: PairResult[] }) {
+  if (components.length < 2) return null;
+  const map = new Map(pairs.map((p) => [pairKey(p.drugs[0], p.drugs[1]), p]));
+  return (
+    <div className="matrix-wrap">
+      <table className="matrix">
+        <thead>
+          <tr>
+            <th />
+            {components.map((c) => <th key={c}>{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {components.map((row, i) => (
+            <tr key={row}>
+              <th>{row}</th>
+              {components.map((col, j) => {
+                if (i === j) return <td key={col} className="diag">·</td>;
+                if (j < i) return <td key={col} />;
+                const p = map.get(pairKey(row, col));
+                if (!p) return <td key={col}>—</td>;
+                const label = p.category === "contraindicated" ? "X" : p.grade ?? "–";
+                return (
+                  <td key={col}>
+                    <a href={`#pair-${pairKey(row, col)}`}>
+                      <GradePill grade={p.grade} category={p.category} />
+                      <span className="sr-only">{label}</span>
+                    </a>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -60,7 +131,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showScrubbed, setShowScrubbed] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const onFiles = (files: FileList | null) => {
     if (!files) return;
@@ -72,7 +143,10 @@ export default function App() {
   };
 
   const run = async () => {
-    setLoading(true); setError(null); setResult(null);
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setFilter("all");
     try {
       const res = await checkInteractions({
         text: text || undefined,
@@ -88,76 +162,245 @@ export default function App() {
     }
   };
 
-  const sorted = result ? [...result.pairs].sort((a, b) => {
-    const rank = (p: PairResult) => p.category === "contraindicated" ? 0 : p.grade === "A" ? 1 : p.grade === "B" ? 2 : p.grade === "C" ? 3 : 4;
-    return rank(a) - rank(b);
-  }) : [];
+  const components = result ? uniqueComponents(result) : [];
+  const expectedPairs = components.length >= 2
+    ? (components.length * (components.length - 1)) / 2
+    : 0;
+
+  const sorted = useMemo(() => {
+    if (!result) return [];
+    return [...result.pairs].sort((a, b) => rank(a) - rank(b));
+  }, [result]);
+
+  const counts = useMemo(() => {
+    const c = { flagged: 0, timing: 0, none: 0 };
+    for (const p of sorted) {
+      if (p.category === "timing") c.timing += 1;
+      else if (p.category === "none" && !p.grade) c.none += 1;
+      else c.flagged += 1;
+    }
+    return c;
+  }, [sorted]);
+
+  const visible = sorted.filter((p) => {
+    if (filter === "all") return true;
+    if (filter === "timing") return p.category === "timing";
+    if (filter === "none") return p.category === "none" && !p.grade;
+    return !(p.category === "none" && !p.grade) && p.category !== "timing";
+  });
+
+  const fdcs = result?.normalized_drugs.filter((d) => d.components.length > 1) ?? [];
 
   return (
-    <div style={{ maxWidth: 860, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ marginBottom: 4 }}>DDI Explorer</h1>
-      <p style={{ color: "#6b7280", marginTop: 0 }}>Evidence-graded drug–drug interaction checking. Patient identifiers are removed before any AI processing.</p>
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <div className="mark" aria-hidden>D×D</div>
+          <div>
+            <h1>DDI Explorer</h1>
+            <p className="lede">Evidence-graded drug–drug interaction check for clinicians</p>
+          </div>
+        </div>
+        <p className="top-note">
+          Decision support only. Not a substitute for a clinical pharmacist or approved labeling.
+        </p>
+      </header>
 
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5}
-        placeholder={"Type or paste a prescription, e.g.\nTab Telma 40 1-0-0\nTab Dolo 650 1-0-1\n..."}
-        style={{ width: "100%", borderRadius: 8, border: "1px solid #d1d5db", padding: 10, fontSize: 14 }} />
+      <section className="explainer">
+        <div className="panel panel-pad">
+          <p className="kicker">What this does</p>
+          <h2>Paste a prescription. Every component pair is graded against retrieved evidence.</h2>
+          <p className="intro">
+            Typed text and prescription photos are de-identified on the server before any
+            reasoning model sees them. Indian brand names resolve to generics; combination
+            products are split. Known pairs come from labeling and RxNav; the rest go through
+            an evidence waterfall and stop at the first solid source.
+          </p>
+          <ol className="steps">
+            <li><span className="n">1</span><div><strong>Read</strong> <span>text and/or a photo of the Rx</span></div></li>
+            <li><span className="n">2</span><div><strong>Strip identifiers</strong> <span>names, phones, Aadhaar, MRN — before any LLM</span></div></li>
+            <li><span className="n">3</span><div><strong>Resolve</strong> <span>Indian brands → RxNorm generics; FDCs split into ingredients</span></div></li>
+            <li><span className="n">4</span><div><strong>Pair</strong> <span>every ingredient with every other ingredient from a different product</span></div></li>
+            <li><span className="n">5</span><div><strong>Grade</strong> <span>A labeling · B trials · C case reports · or no DDI — with citations</span></div></li>
+          </ol>
+        </div>
+        <div className="panel panel-pad">
+          <p className="kicker">How to read a grade</p>
+          <div className="grades">
+            <div className="grade-row">
+              <span className="pill A">A</span>
+              <p><b>Approved / known.</b> FDA label “Drug Interactions” or RxNav. Strongest source we accept.</p>
+            </div>
+            <div className="grade-row">
+              <span className="pill B">B</span>
+              <p><b>Human trial literature.</b> RCT, PK study, meta-analysis, or a registered trial — not yet in labeling.</p>
+            </div>
+            <div className="grade-row">
+              <span className="pill C">C</span>
+              <p><b>Weak evidence.</b> Case reports, in-vitro, or mechanism only. Conflicts are disclosed, not hidden.</p>
+            </div>
+            <div className="grade-row">
+              <span className="pill none">NONE</span>
+              <p><b>No DDI found</b> in the sources we retrieved. Absence of evidence is stated, never inferred as safe.</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, margin: "10px 0" }}>
-        <textarea value={patient} onChange={(e) => setPatient(e.target.value)} rows={2}
-          placeholder="Patient context (optional): age, sex, weight, renal/hepatic function, pregnancy..."
-          style={{ borderRadius: 8, border: "1px solid #d1d5db", padding: 10, fontSize: 13 }} />
-        <textarea value={timing} onChange={(e) => setTiming(e.target.value)} rows={2}
-          placeholder="Timing (optional): e.g. drug A 1-0-1 before food, drug B 0-0-1..."
-          style={{ borderRadius: 8, border: "1px solid #d1d5db", padding: 10, fontSize: 13 }} />
-      </div>
+      <section className="workspace panel panel-pad">
+        <p className="kicker">Check a list</p>
+        <div className="rx-box">
+          <label className="field" htmlFor="rx">
+            Prescription or medication list
+          </label>
+          <textarea
+            id="rx"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={"Tab Telma 40  1-0-0\nTab Dolo 650  1-0-1\nTab Ecosprin 75  0-1-0\n…or just names, one per line."}
+          />
+        </div>
+        <div className="side-fields">
+          <div className="field">
+            <label htmlFor="pt">Patient context (optional)</label>
+            <textarea
+              id="pt"
+              value={patient}
+              onChange={(e) => setPatient(e.target.value)}
+              placeholder="Age, sex, weight, CrCl / eGFR, hepatic function, pregnancy, comorbidities"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="tm">Timing (optional)</label>
+            <textarea
+              id="tm"
+              value={timing}
+              onChange={(e) => setTiming(e.target.value)}
+              placeholder="e.g. levothyroxine 1-0-0 empty stomach; calcium 0-0-1"
+            />
+          </div>
+        </div>
+        <div className="toolbar">
+          <div>
+            <label className="file-btn">
+              Attach prescription photo
+              <input type="file" accept="image/*" multiple onChange={(e) => onFiles(e.target.files)} />
+            </label>
+            {images.length > 0 && (
+              <div className="thumbs" style={{ marginTop: 8 }}>
+                {images.map((src, i) => (
+                  <div className="thumb" key={i}>
+                    <img src={src} alt={`Prescription ${i + 1}`} />
+                    <button type="button" onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))} aria-label="Remove image">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="run" onClick={run} disabled={loading || (!text && images.length === 0)}>
+            {loading ? "Checking pairs…" : "Check interactions"}
+          </button>
+        </div>
+        <p className="hint">
+          A full check takes about 30–40 seconds. Identifiers never reach the reasoning model.
+          Five single-ingredient drugs produce 10 pairs — C(n, 2). Combination products add more.
+        </p>
+      </section>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14 }}>
-        <label style={{ fontSize: 14 }}>
-          📷 Prescription photo: <input type="file" accept="image/*" multiple onChange={(e) => onFiles(e.target.files)} />
-        </label>
-        {images.length > 0 && <span style={{ fontSize: 13, color: "#6b7280" }}>{images.length} image(s) attached</span>}
-        <button onClick={run} disabled={loading || (!text && images.length === 0)}
-          style={{ marginLeft: "auto", background: "#111827", color: "#fff", border: 0, borderRadius: 8, padding: "10px 22px", fontSize: 15, cursor: "pointer", opacity: loading ? 0.6 : 1 }}>
-          {loading ? "Checking…" : "Check interactions"}
-        </button>
-      </div>
+      {error && <div className="error" role="alert">{error}</div>}
 
-      {error && <div style={{ background: "#fef2f2", color: "#b91c1c", padding: 12, borderRadius: 8 }}>{error}</div>}
+      {loading && (
+        <div className="loading panel">
+          <h3>Working through the list</h3>
+          <p>
+            De-identifying the text, extracting medicines, resolving Indian brands to generics,
+            then grading each pair. Known interactions return from RxNav without a model call;
+            unknown pairs walk openFDA → PubMed / trials → case reports.
+          </p>
+        </div>
+      )}
 
       {result && (
-        <div>
+        <div className="results">
+          <section className="panel resolved">
+            <div className="resolved-head">
+              <h3>Resolved medicines</h3>
+              <p className="pair-math">
+                {result.normalized_drugs.length} input{result.normalized_drugs.length === 1 ? "" : "s"}
+                {" → "}
+                <b>{components.length} component{components.length === 1 ? "" : "s"}</b>
+                {" → "}
+                <b>{result.pairs.length} pair{result.pairs.length === 1 ? "" : "s"} checked</b>
+                {expectedPairs > 0 && result.pairs.length === expectedPairs
+                  ? ` · C(${components.length}, 2) = ${expectedPairs}`
+                  : null}
+              </p>
+            </div>
+            <div className="chips">
+              {result.normalized_drugs.map((d) => (
+                <div className="chip" key={d.input_name}>
+                  <span className="from">{d.input_name}</span>
+                  <span className="to">
+                    {d.components.length ? d.components.join(" + ") : (d.generic_name || "unresolved")}
+                  </span>
+                  <span className="via">{d.resolved_via ? (VIA[d.resolved_via] || d.resolved_via) : "not in index"}</span>
+                </div>
+              ))}
+            </div>
+            {fdcs.length > 0 && (
+              <p className="fdc-note">
+                Combination product{fdcs.length > 1 ? "s" : ""} split into ingredients
+                ({fdcs.map((d) => `${d.input_name} → ${d.components.join(" + ")}`).join("; ")}).
+                Each ingredient is paired with every ingredient from the other medicines.
+              </p>
+            )}
+            <PairMatrix components={components} pairs={result.pairs} />
+          </section>
+
           {result.contraindicated_banner.length > 0 && (
-            <div style={{ background: "#991b1b", color: "#fff", borderRadius: 10, padding: 14, marginBottom: 16 }}>
-              <strong>⛔ CONTRAINDICATED COMBINATIONS</strong>
+            <div className="banner" role="alert">
+              <strong>CONTRAINDICATED</strong>
               {result.contraindicated_banner.map((p, i) => (
-                <div key={i} style={{ marginTop: 6 }}>{p.drugs[0]} + {p.drugs[1]} — {p.summary}</div>
+                <div key={i}>{p.drugs[0]} + {p.drugs[1]} — {p.summary}</div>
               ))}
             </div>
           )}
 
           {result.unresolved_drugs.length > 0 && (
-            <div style={{ background: "#fffbeb", border: "1px solid #f59e0b", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13 }}>
-              Could not resolve: {result.unresolved_drugs.join(", ")} — check spelling or use generic names.
+            <div className="warn-box">
+              Could not resolve: {result.unresolved_drugs.join(", ")}. Check spelling or use the generic name.
             </div>
           )}
 
           {result.avoid_with_medications.length > 0 && (
-            <div style={{ background: "#fdf4ff", border: "1px solid #c084fc", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13 }}>
-              <strong>Avoid with medications:</strong>
-              <ul style={{ margin: "4px 0" }}>{result.avoid_with_medications.map((a, i) => <li key={i}>{a}</li>)}</ul>
+            <div className="avoid-box">
+              <strong>Avoid with these medications</strong>
+              <ul>{result.avoid_with_medications.map((a, i) => <li key={i}>{a}</li>)}</ul>
             </div>
           )}
 
-          <h2 style={{ fontSize: 18 }}>Results ({result.pairs.length} pairs)</h2>
-          {sorted.map((p, i) => <PairCard key={i} p={p} />)}
-          {result.pairs.length === 0 && <p>No drug pairs to check.</p>}
+          <div className="tabs" role="tablist">
+            {([
+              ["all", `All pairs (${sorted.length})`],
+              ["flagged", `Interactions (${counts.flagged})`],
+              ["timing", `Timing-manageable (${counts.timing})`],
+              ["none", `No DDI (${counts.none})`],
+            ] as const).map(([id, label]) => (
+              <button key={id} className={filter === id ? "on" : ""} onClick={() => setFilter(id)} type="button">
+                {label}
+              </button>
+            ))}
+          </div>
 
-          <details style={{ marginTop: 12 }} open={showScrubbed} onToggle={(e) => setShowScrubbed((e.target as HTMLDetailsElement).open)}>
-            <summary style={{ cursor: "pointer", fontSize: 13, color: "#6b7280" }}>🔒 What the AI saw (de-identified input)</summary>
-            <pre style={{ background: "#f3f4f6", padding: 10, borderRadius: 8, fontSize: 12, whiteSpace: "pre-wrap" }}>{result.scrubbed_text}</pre>
+          {visible.map((p, i) => <PairCard key={i} p={p} />)}
+          {visible.length === 0 && <p className="empty-pairs">Nothing in this filter.</p>}
+
+          <details className="audit">
+            <summary>What the model saw (de-identified input)</summary>
+            <pre>{result.scrubbed_text}</pre>
           </details>
 
-          <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 16, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>{result.disclaimer}</p>
+          <p className="disclaimer">{result.disclaimer}</p>
         </div>
       )}
     </div>

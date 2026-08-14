@@ -25,6 +25,21 @@ RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
 DATA_PATH = Path(__file__).parent.parent / "data" / "indian_drugs.json"
 
 FUZZY_THRESHOLD = 88  # rapidfuzz score (0-100); brand names are noisy
+GENERIC_FUZZY_THRESHOLD = 92  # stricter: short generics must not become FDCs
+
+# Tokens that are units / fillers, never drug components
+_JUNK = frozenset({
+    "ml", "mg", "mcg", "ug", "µg", "g", "gm", "kg",
+    "iu", "i.u", "units", "unit",
+    "%", "w/w", "w/v", "v/v",
+    "na", "nil", "qs", "q.s", "q.s.",
+})
+_SOLID_FORMS = ("tablet", "capsule")
+_OTHER_FORMS = (
+    "drop", "syrup", "suspension", "injection", "infusion",
+    "gel", "cream", "ointment", "solution", "liquid",
+    "inhaler", "spray", "lotion", "patch",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -39,26 +54,63 @@ def _indian_index() -> dict[str, list[str]]:
         return json.load(f)
 
 
+def _form_penalty(brand_key: str, query: str) -> int:
+    """Unspecified form prefers tablet/capsule over drops/syrup/gel."""
+    specified = [f for f in _SOLID_FORMS + _OTHER_FORMS if f in query]
+    if specified:
+        return 0 if any(f in brand_key for f in specified) else 1
+    if any(f in brand_key for f in _SOLID_FORMS):
+        return 0
+    if any(f in brand_key for f in _OTHER_FORMS):
+        return 2
+    return 1
+
+
+def _pick_brand(hits: list[str], index: dict[str, list[str]], query: str) -> str:
+    return min(hits, key=lambda k: (len(index[k]), _form_penalty(k, query), len(k)))
+
+
+@lru_cache
+def _known_generics() -> frozenset[str]:
+    """Generic names that appear as Indian-dataset components."""
+    out: set[str] = set()
+    for comps in _indian_index().values():
+        for raw in comps:
+            for part in split_components(raw):
+                if len(part) >= 4:
+                    out.add(part)
+    return frozenset(out)
+
+
 def _lookup_indian(name: str) -> list[str] | None:
-    """Brand -> composition(s). Prefers exact, then prefix, then fuzzy;
-    among fuzzy candidates prefers the fewest components (a plain brand
-    should not resolve to a combination product)."""
+    """Brand -> composition(s). Exact, word-bounded prefix, known generic,
+    then fuzzy. A plain generic must not resolve to an FDC; a bare brand
+    prefers the oral solid over drops/syrup."""
     index = _indian_index()
     if not index:
         return None
     key = name.lower().strip()
+    if not key:
+        return None
     if key in index:
         return index[key]
-    # prefix match: 'telma 40' -> 'telma 40 tablet'
-    prefix_hits = [k for k in index if k.startswith(key + " ") or k.startswith(key)]
+    # word-bounded prefix only: 'dolo' must not match 'dolonex'
+    prefix_hits = [k for k in index if k.startswith(key + " ") or k.startswith(key + "-")]
     if prefix_hits:
-        best = min(prefix_hits, key=lambda k: (len(index[k]), len(k)))
-        return index[best]
-    # fuzzy: take top candidates, prefer fewest components
-    matches = process.extract(key, index.keys(), scorer=fuzz.WRatio, limit=5)
+        return index[_pick_brand(prefix_hits, index, key)]
+    # typed name is already a generic (e.g. 'amlodipine') — do not fuzzy an FDC
+    generics = _known_generics()
+    if key in generics:
+        return [key]
+    gmatch = process.extractOne(key, generics, scorer=fuzz.WRatio)
+    if gmatch and gmatch[1] >= GENERIC_FUZZY_THRESHOLD:
+        return [gmatch[0]]
+    matches = process.extract(key, index.keys(), scorer=fuzz.WRatio, limit=15)
     matches = [m for m in matches if m[1] >= FUZZY_THRESHOLD]
     if matches:
-        best = min(matches, key=lambda m: (len(index[m[0]]), -m[1]))
+        singles = [m for m in matches if len(index[m[0]]) == 1]
+        pool = singles or matches
+        best = min(pool, key=lambda m: (len(index[m[0]]), -m[1], _form_penalty(m[0], key)))
         return index[best[0]]
     return None
 
@@ -91,19 +143,26 @@ async def _rxnav_resolve(client: httpx.AsyncClient, name: str) -> tuple[str | No
 
 
 def split_components(generic_string: str) -> list[str]:
-    """'amoxycillin / clavulanic acid' or 'telmisartan + amlodipine' -> list."""
-    parts = re.split(r"\s*(?:/|\+|\band\b|,)\s*", generic_string.lower())
-    cleaned = []
+    """'amoxycillin / clavulanic acid' or 'telmisartan + amlodipine' -> list.
+
+    Parenthetical strengths are stripped *before* splitting so that
+    'paracetamol (100mg/ml)' does not become ['paracetamol', 'ml'].
+    """
+    s = generic_string.lower().strip()
+    s = re.sub(r"\([^)]*\)", " ", s)
+    parts = re.split(r"\s*(?:/|\+|\band\b|,|;)\s*", s)
+    cleaned: list[str] = []
+    seen: set[str] = set()
     for p in parts:
-        # strip parenthesized strengths: '(500mg)' / '(125 mg)'
-        p = re.sub(r"\([^)]*\d[^)]*\)", "", p)
-        # strip bare strengths: 'amoxycillin 500 mg' -> 'amoxycillin'
-        p = re.sub(r"\b\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|%)\b.*", "", p).strip()
-        p = re.sub(r"\b(tablet|capsule|injection|syrup|cream|ointment|drops?)\b", "", p).strip()
-        p = p.strip("() -").strip()
-        if p:
+        p = re.sub(r"\b\d+(\.\d+)?\s*(mg|mcg|ug|µg|g|gm|ml|iu|i\.u\.?|%)\b", " ", p)
+        p = re.sub(r"\b(tablet|tablets|capsule|capsules|injection|syrup|cream|ointment|drops?|solution|suspension)\b", " ", p)
+        p = re.sub(r"\s+", " ", p).strip("() -.")
+        if not p or p in _JUNK or len(p) < 3:
+            continue
+        if p not in seen:
+            seen.add(p)
             cleaned.append(p)
-    return cleaned or [generic_string.lower()]
+    return cleaned
 
 
 async def normalize_drugs(names: list[str]) -> tuple[list[NormalizedDrug], list[str]]:
@@ -118,7 +177,17 @@ async def normalize_drugs(names: list[str]) -> tuple[list[NormalizedDrug], list[
             # 1) Indian brand dataset
             comps = _lookup_indian(raw)
             if comps:
-                flat = [c for comp in comps for c in split_components(comp)]
+                flat: list[str] = []
+                seen: set[str] = set()
+                for comp in comps:
+                    for c in split_components(comp):
+                        if c not in seen:
+                            seen.add(c)
+                            flat.append(c)
+                if not flat:
+                    unresolved.append(raw)
+                    normalized.append(NormalizedDrug(input_name=raw, resolved_via=None))
+                    continue
                 # try to grab an RxCUI for the first component for pre-filter use
                 rxcui, _ = await _rxnav_resolve(client, flat[0])
                 normalized.append(NormalizedDrug(
