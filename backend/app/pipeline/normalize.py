@@ -3,7 +3,7 @@
 Order of resolution:
   1. Local Indian brand dataset (fuzzy match) -> generic composition(s)
   2. RxNav/RxNorm (spell-fix, brand->generic, RxCUI)
-  3. (misses returned as `unresolved` — the agent may web-verify them)
+  3. Misses stay unresolved here. `agent.web_resolve` may fill them next.
 
 Combination products (FDCs) are split into components so every
 component pair gets checked downstream.
@@ -326,7 +326,7 @@ async def normalize_drugs(names: list[str]) -> tuple[list[NormalizedDrug], list[
                     rxcui=rxcui, components=comps, component_rxcuis=cuis,
                     resolved_via="rxnav"))
                 continue
-            # 3) unresolved -> agent web verification downstream
+            # 3) miss — service may web-verify via agent.web_resolve
             unresolved.append(raw)
             normalized.append(NormalizedDrug(input_name=raw, resolved_via=None))
 

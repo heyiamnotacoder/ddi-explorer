@@ -48,7 +48,8 @@ FastAPI — PRE-AGENT PIPELINE (deterministic, no LLM)
        b. RxNav/RxNorm API for generic/international names + spell-fix
        c. FDC split: combination products → component list;
           each ingredient gets its own RxCUI
-       d. Misses → unresolved (websearch verification is follow-up work)
+       d. Misses → web verification on the scrubbed name (`resolved_via=agent_web`);
+          still unresolved if retrieved pages do not name a generic
   5. Local known-DDI pre-filter (RxNav interaction API):
        same NormalizedDrug shape as a fresh check; match on component RxCUI
        resolves known pairs instantly → Grade A, zero LLM tokens
@@ -133,7 +134,7 @@ Unfetched search hits are not citations.
 | # | Case | Handling |
 |---|---|---|
 | 1 | Combination products / FDCs | Split into components; every component pair checked |
-| 2 | Indian brand names | Local dataset fuzzy match → generic; misses → unresolved (websearch verification is follow-up) |
+| 2 | Indian brand names | Local dataset fuzzy match → generic; misses → RxNav; still missing → web verification on scrubbed name (`agent_web`) |
 | 3 | Non-drugs (alcohol, tobacco, herbals, grapefruit) | Rejected from pair-checking; **"Avoid with medications"** from openFDA labels, citations mapped to retrieved records; no hit → honest empty copy |
 | 4 | N-drug explosion | Two-tier: local pre-filter resolves known pairs free; only unknown pairs hit agent. Cap 15 drugs, bounded concurrency, **severity-sorted pair matrix on the results screen** |
 | 5 | Missing dose | Conditional phrasing ("DDI possible if dose > X") |
@@ -154,7 +155,8 @@ Unfetched search hits are not citations.
 POST /api/check
   body: { text?, images[]?, patient_context?, timing? }
   → { scrubbed_text,
-      normalized_drugs: [{input_name, components, dose?, schedule?, ...}],
+      normalized_drugs: [{input_name, components, dose?, schedule?,
+                          resolved_via: indian_dataset|rxnav|agent_web, ...}],
       unresolved_drugs,
       pairs: [{drugs, grade, severity, summary, citations[],
                category: "interaction"|"timing"|"contraindicated"|"none",
@@ -208,5 +210,5 @@ CI pytest) — e.g. warfarin+aspirin → A, MAOI+SSRI → contraindicated banner
 
 1. ⚙️ Vision fallback default = Claude (`VISION_MODEL`). Gemini needs `GEMINI_API_KEY`.
 2. ⚙️ Stateless backend; browser-local history, when added, is scrubbed snapshots only.
-3. Indian dataset (GitHub, scraped from 1mg) is acceptable for v1 — licensing/data-freshness caveat noted; websearch fallback covers misses (follow-up).
+3. Indian dataset (GitHub, scraped from 1mg) is acceptable for v1 — licensing/data-freshness caveat noted; websearch fallback covers dataset+RxNav misses.
 4. Evidence tools are REST wrappers in-tree. MCP servers are optional later; they are not required to run the app.

@@ -24,6 +24,7 @@ function isInsufficient(p: PairResult) {
 const VIA: Record<string, string> = {
   indian_dataset: "Indian brand index",
   rxnav: "RxNorm",
+  agent_web: "web verification",
 };
 
 function uniqueComponents(result: CheckResponse): string[] {

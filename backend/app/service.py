@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from .agent import alternatives as alts
-from .agent import extract, waterfall
+from .agent import extract, waterfall, web_resolve
 from .models import (
     AlternativeSuggestion,
     AlternativesRequest,
@@ -128,11 +128,12 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     extracted_drugs = [d for d in extracted["drugs"] if d.get("name")]
     patient_ctx = _patient_ctx_for_llm(extracted, scrubbed.text)
 
-    # 4) Normalize (local Indian dataset -> RxNav -> unresolved)
+    # 4) Normalize (Indian dataset -> RxNav -> web verification on misses)
     normalized, unresolved = await norm.normalize_drugs(
         [d["name"] for d in extracted_drugs]
     )
     normalized = _attach_extract_fields(normalized, extracted_drugs)
+    normalized, unresolved = await web_resolve.apply(normalized)
 
     # 5) Local pre-filter: known pairs resolved without LLM tokens
     known_results, unknown_pairs = await prefilter.check_known_pairs(
@@ -191,6 +192,8 @@ async def _recheck_against_rest(
 ) -> tuple[list[PairResult], list[str], str | None]:
     """Normalize one substitute and grade it only vs leftover components."""
     normalized, unresolved = await norm.normalize_drugs([alt_name])
+    if normalized:
+        normalized, unresolved = await web_resolve.apply(normalized)
     if not normalized or not normalized[0].components:
         return [], [], (unresolved[0] if unresolved else alt_name)
     alt = normalized[0]

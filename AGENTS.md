@@ -58,7 +58,8 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │       ├── extract.py    first LLM call (drugs from scrubbed text)
 │   │       ├── alternatives.py  second loop: which drug to change
 │   │       ├── tools.py      openFDA, PubMed, CT.gov, Firecrawl
-│   │       └── waterfall.py  per-pair A→B→C early exit
+│   │       ├── waterfall.py  per-pair A→B→C early exit
+│   │       └── web_resolve.py  dataset+RxNav misses via scrubbed web search
 │   ├── scripts/fetch_indian_dataset.py
 │   └── tests/                pytest (offline; no live API keys)
 └── frontend/                 React 19 + Vite 8 + TypeScript
@@ -102,7 +103,7 @@ Presidio scrub          ← first (and last) gate before any reasoning LLM
         ▼
 LLM extract             drugs[], non_drugs[], patient_context
         ▼
-normalize               Indian dataset → RxNav → unresolved
+normalize               Indian dataset → RxNav → web verification on misses
         ▼
 RxNav pre-filter        known pairs → Grade A (source_tier="local")
         ▼
@@ -157,7 +158,11 @@ Per name, cap `MAX_DRUGS_PER_REQUEST` (default 15):
    (rapidfuzz ≥ 88). Prefer fewer components so a plain brand does not
    become an FDC; unspecified form prefers tablet/capsule over drops.
 2. Else RxNav `/approximateTerm` → RxCUI + RxNorm name.
-3. Else mark unresolved.
+3. Else `agent/web_resolve.py`: Firecrawl search/fetch on the **scrubbed**
+   name (regex PHI only — NER off so unknown brands are not PERSON). The
+   LLM may only return generics that appear in retrieved text.
+   `resolved_via="agent_web"`. Still unresolved if nothing maps.
+   DDI grades still require mapped citations downstream.
 
 `split_components` turns `amoxycillin (500mg) / clavulanic acid (125mg)` into
 `["amoxycillin", "clavulanic acid"]`. Strengths like `(100mg/ml)` are stripped
@@ -340,8 +345,8 @@ tier). Do not treat that latency as a hang.
 `backend/tests/test_normalize.py` — Indian exact/fuzzy/FDC split, unknown names.
 
 `backend/tests/test_scrubber.py` / `test_privacy.py` — PHI gone, clinical
-context kept, brands not redacted, raw patient notes never reach extract
-or waterfall.
+context kept, brands not redacted, raw patient notes never reach extract,
+waterfall, or web-resolve queries.
 
 `backend/tests/test_alternatives.py` — importance ranking, adjuvant preferred
 over anchor, timing is not a swap, safer() rejects a new contraindication.
@@ -363,8 +368,12 @@ survive on `NormalizedDrug`.
 cite retrieved setids; no hit / unmapped record → honest empty copy; herbals
 are not invented.
 
-When changing scrub, normalize, ranking, overlay, or LLM wiring, extend these
-tests. Do not add tests that need live API keys. The ~30-pair **full live
+`backend/tests/test_web_resolve.py` — dataset+RxNav miss can resolve via
+scrubbed web verification; invented generics not in the page are dropped;
+already-resolved names skip the web.
+
+When changing scrub, normalize, web resolve, ranking, overlay, or LLM wiring,
+extend these tests. Do not add tests that need live API keys. The ~30-pair **full live
 `/api/check` eval lives on a branch off main** (not default pytest).
 
 Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may

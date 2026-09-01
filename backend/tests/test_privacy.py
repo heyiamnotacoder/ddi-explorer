@@ -6,7 +6,7 @@ import json
 import pytest
 
 from app import service
-from app.agent import llm
+from app.agent import llm, web_resolve
 from app.models import (
     AlternativesRequest,
     Category,
@@ -195,3 +195,54 @@ async def test_complete_scrubs_reasoning_prompts(monkeypatch):
     assert MRN not in blob
     assert "[PHONE_" in blob
     assert "[MRN_" in blob
+
+
+@pytest.mark.asyncio
+async def test_web_resolve_query_never_includes_patient_phi(monkeypatch):
+    searches: list[str] = []
+    llm_seen: list[str] = []
+
+    async def fake_extract(_text: str) -> dict:
+        return {
+            "drugs": [{"name": "mysterybrand", "dose": None, "timing": None}],
+            "non_drugs": [],
+            "patient_context": "Age 56, CrCl 42",
+        }
+
+    async def fake_norm(names: list[str]):
+        return ([NormalizedDrug(input_name=n) for n in names], list(names))
+
+    async def fake_search(query: str, *, limit: int = 5):
+        searches.append(query)
+        return []
+
+    async def fake_complete(messages, **_k) -> str:
+        llm_seen.append(str(messages))
+        return '{"generics": []}'
+
+    async def fake_prefilter(_items):
+        return [], []
+
+    async def fake_waterfall(pairs, patient_ctx=None):
+        return []
+
+    async def fake_avoid(*_a, **_k):
+        return []
+
+    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
+    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
+    monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
+    monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
+    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
+    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
+    monkeypatch.setattr(service.avoid_mod, "lookup", fake_avoid)
+
+    await service.run_check(CheckRequest(
+        text="mysterybrand",
+        patient_context=PHI_NOTES,
+    ))
+    assert searches
+    blob = " ".join(searches + llm_seen)
+    _no_phi(blob)
+    assert "mysterybrand" in blob.lower()
+    assert llm_seen == []
