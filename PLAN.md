@@ -46,10 +46,11 @@ FastAPI — PRE-AGENT PIPELINE (deterministic, no LLM)
        a. Local Indian brand dataset (~242K brands w/ compositions)
           — fuzzy match → generic(s)
        b. RxNav/RxNorm API for generic/international names + spell-fix
-       c. FDC split: combination products → component list
+       c. FDC split: combination products → component list;
+          each ingredient gets its own RxCUI
        d. Misses → unresolved (websearch verification is follow-up work)
   5. Local known-DDI pre-filter (RxNav interaction API):
-       same NormalizedDrug shape as a fresh check
+       same NormalizedDrug shape as a fresh check; match on component RxCUI
        resolves known pairs instantly → Grade A, zero LLM tokens
   ▼
 SINGLE AGENT (default Claude; swap via LLM_MODEL) — unknown pairs only

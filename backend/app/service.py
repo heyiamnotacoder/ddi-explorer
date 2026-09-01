@@ -218,7 +218,10 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
         for item in remaining_base:
             comps = [c for c in item.components if c.lower() != src_l]
             if comps:
-                remaining.append(item.model_copy(update={"components": comps}))
+                remaining.append(item.model_copy(update={
+                    "components": comps,
+                    "rxcui": item.rxcui_for(comps[0]),
+                }))
 
         for alt in (row.get("alternatives") or [])[:2]:
             name = str(alt.get("name") or "").strip()

@@ -42,9 +42,24 @@ class PairResult(BaseModel):
 class NormalizedDrug(BaseModel):
     input_name: str
     generic_name: str | None = None
-    rxcui: str | None = None
+    rxcui: str | None = None  # first resolved component; prefer rxcui_for()
     components: list[str] = Field(default_factory=list)  # >1 for FDCs/combos
+    component_rxcuis: dict[str, str] = Field(default_factory=dict)
     resolved_via: str | None = None  # "indian_dataset" | "rxnav" | "agent_web" | None
+
+    def rxcui_for(self, component: str) -> str | None:
+        """RxCUI for one ingredient. Never reuse a sibling FDC component's id."""
+        key = component.lower()
+        for name, cui in self.component_rxcuis.items():
+            if name.lower() == key and cui:
+                return cui
+        if (
+            len(self.components) == 1
+            and self.components[0].lower() == key
+            and self.rxcui
+        ):
+            return self.rxcui
+        return None
 
 
 class CheckRequest(BaseModel):

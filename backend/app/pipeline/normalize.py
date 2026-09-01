@@ -200,6 +200,20 @@ def _pick_rxnav_candidate(
     return best[0], best[1]
 
 
+async def _rxcuis_for_components(
+    client: httpx.AsyncClient, names: list[str],
+) -> dict[str, str]:
+    """One RxCUI per ingredient. Never copy the first component's id onto the rest."""
+    if not names:
+        return {}
+    resolved = await asyncio.gather(*[_rxnav_resolve(client, n) for n in names])
+    out: dict[str, str] = {}
+    for name, (cui, _) in zip(names, resolved):
+        if cui:
+            out[name] = cui
+    return out
+
+
 async def _rxnav_resolve(client: httpx.AsyncClient, name: str) -> tuple[str | None, str | None]:
     """name -> (rxcui, generic_name) using approximate matching (handles typos).
 
@@ -291,19 +305,26 @@ async def normalize_drugs(names: list[str]) -> tuple[list[NormalizedDrug], list[
                     unresolved.append(raw)
                     normalized.append(NormalizedDrug(input_name=raw, resolved_via=None))
                     continue
-                # try to grab an RxCUI for the first component for pre-filter use
-                rxcui, _ = await _rxnav_resolve(client, flat[0])
+                cuis = await _rxcuis_for_components(client, flat)
+                rxcui = next((cuis[c] for c in flat if c in cuis), None)
                 normalized.append(NormalizedDrug(
                     input_name=raw, generic_name=", ".join(flat),
-                    rxcui=rxcui, components=flat, resolved_via="indian_dataset"))
+                    rxcui=rxcui, components=flat, component_rxcuis=cuis,
+                    resolved_via="indian_dataset"))
                 continue
             # 2) RxNav
             rxcui, generic = await _rxnav_resolve(client, raw)
             if generic:
                 comps = split_components(generic)
+                if len(comps) <= 1:
+                    cuis = {comps[0]: rxcui} if comps and rxcui else {}
+                else:
+                    cuis = await _rxcuis_for_components(client, comps)
+                    rxcui = next((cuis[c] for c in comps if c in cuis), rxcui)
                 normalized.append(NormalizedDrug(
                     input_name=raw, generic_name=generic.lower(),
-                    rxcui=rxcui, components=comps, resolved_via="rxnav"))
+                    rxcui=rxcui, components=comps, component_rxcuis=cuis,
+                    resolved_via="rxnav"))
                 continue
             # 3) unresolved -> agent web verification downstream
             unresolved.append(raw)

@@ -26,13 +26,20 @@ def _is_contraindicated(desc: str) -> bool:
     return "contraindicat" in desc.lower()
 
 
+def _concept_cui(concept: dict) -> str | None:
+    mini = concept.get("minConceptItem") or {}
+    cui = mini.get("rxcui") or concept.get("rxcui")
+    return str(cui) if cui else None
+
+
 async def check_known_pairs(
     drugs: list[NormalizedDrug],
 ) -> tuple[list[PairResult], list[tuple[str, str]]]:
     """Returns (resolved_pair_results, unresolved_component_pairs).
 
     Only pairs where BOTH sides have RxCUIs can be checked via RxNav;
-    everything else flows to the agent waterfall.
+    everything else flows to the agent waterfall. Each FDC ingredient uses
+    its own RxCUI — never a sibling's.
     """
     settings = get_settings()
 
@@ -42,14 +49,18 @@ async def check_known_pairs(
         for j in range(i + 1, len(drugs)):
             for ca in drugs[i].components:
                 for cb in drugs[j].components:
-                    if ca != cb:
-                        pairs.append((ca, cb, drugs[i].rxcui, drugs[j].rxcui))
+                    if ca.lower() != cb.lower():
+                        pairs.append(
+                            (ca, cb, drugs[i].rxcui_for(ca), drugs[j].rxcui_for(cb)))
 
     cui_pairs = [p for p in pairs if p[2] and p[3] and p[2] != p[3]]
     no_cui_pairs = {(a, b) for a, b, ra, rb in pairs if not (ra and rb) or ra == rb}
 
     resolved: list[PairResult] = []
     resolved_names: set[tuple[str, str]] = set()
+    our_by_cuis: dict[tuple[str, str], tuple[str, str]] = {}
+    for a, b, ra, rb in cui_pairs:
+        our_by_cuis[tuple(sorted((ra, rb)))] = (a, b)
 
     cuis = sorted({c for p in cui_pairs for c in (p[2], p[3]) if c})
     if cuis:
@@ -67,18 +78,20 @@ async def check_known_pairs(
                 for pair in fit.get("interactionPair", []):
                     desc = pair.get("description", "")
                     sev = pair.get("severity", "")
-                    names = tuple(sorted(
-                        c.get("name", "").lower()
-                        for c in pair.get("interactionConcept", [])
-                        if c.get("name")
-                    ))
-                    if len(names) != 2:
+                    concepts = pair.get("interactionConcept") or []
+                    hit_cuis = [_concept_cui(c) for c in concepts]
+                    hit_cuis = [c for c in hit_cuis if c]
+                    if len(hit_cuis) != 2:
                         continue
+                    ours = our_by_cuis.get(tuple(sorted(hit_cuis)))
+                    if not ours:
+                        continue
+                    names = tuple(sorted((ours[0].lower(), ours[1].lower())))
                     full_desc = f"{desc} (severity: {sev})" if sev else desc
                     cat = (Category.CONTRAINDICATED if _is_contraindicated(full_desc)
                            else Category.INTERACTION)
                     resolved.append(PairResult(
-                        drugs=(names[0], names[1]),
+                        drugs=names,
                         grade=Grade.A,
                         category=cat,
                         severity=_severity_rank(full_desc + " " + sev),
@@ -90,7 +103,9 @@ async def check_known_pairs(
                     resolved_names.add(names)
 
     # Anything RxNav didn't cover goes to the agent waterfall
-    unresolved: set[tuple[str, str]] = set(no_cui_pairs)
+    unresolved: set[tuple[str, str]] = set()
+    for a, b in no_cui_pairs:
+        unresolved.add(tuple(sorted((a, b))))
     for a, b, _, _ in cui_pairs:
         key = tuple(sorted((a, b)))
         if key not in resolved_names:

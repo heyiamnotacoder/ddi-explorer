@@ -159,11 +159,14 @@ Per name, cap `MAX_DRUGS_PER_REQUEST` (default 15):
 `["amoxycillin", "clavulanic acid"]`. Strengths like `(100mg/ml)` are stripped
 before the `/` split so `ml` is never a component. Every *component* pair
 across different input drugs is checked — an FDC therefore adds pairs.
+Each ingredient gets its own RxCUI (`component_rxcuis`); the first is also
+copied to `rxcui` for display. A sibling's identifier is never reused.
 
 ### 5. Pre-filter — `pipeline/prefilter.py`
 
-RxNav interaction list for pairs that have two distinct RxCUIs. Hits become
-Grade A, `source_tier="local"`, and never enter the waterfall.
+RxNav interaction list for pairs that have two distinct **component** RxCUIs.
+Hits become Grade A, `source_tier="local"`, and never enter the waterfall.
+Match on RxCUI so Indian spellings (`amoxycillin`) still hit.
 
 ### 6. Waterfall — `agent/waterfall.py`
 

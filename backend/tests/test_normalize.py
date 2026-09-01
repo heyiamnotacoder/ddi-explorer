@@ -1,4 +1,8 @@
 """Normalization tests — offline parts only (no network)."""
+import pytest
+
+from app.models import NormalizedDrug
+from app.pipeline import normalize as norm
 from app.pipeline.normalize import (
     _bare_name,
     _lookup_indian,
@@ -122,6 +126,42 @@ def test_rxnav_picker_skips_combo_when_query_is_a_single_drug():
     rxcui, name = _pick_rxnav_candidate("amilodipine 20mg", rows)
     assert rxcui == "17767"
     assert name == "amlodipine"
+
+
+def test_rxcui_for_does_not_reuse_sibling_identifier():
+    d = NormalizedDrug(
+        input_name="Augmentin",
+        rxcui="723",
+        components=["amoxycillin", "clavulanic acid"],
+        component_rxcuis={"amoxycillin": "723"},
+    )
+    assert d.rxcui_for("amoxycillin") == "723"
+    assert d.rxcui_for("clavulanic acid") is None
+
+
+@pytest.mark.asyncio
+async def test_indian_fdc_resolves_one_rxcui_per_component(monkeypatch):
+    seen: list[str] = []
+
+    async def fake_resolve(_client, name):
+        seen.append(name)
+        table = {
+            "amoxycillin": ("723", "amoxicillin"),
+            "clavulanic acid": ("21212", "clavulanate"),
+        }
+        return table.get(name, (None, None))
+
+    monkeypatch.setattr(norm, "_rxnav_resolve", fake_resolve)
+    drugs, unresolved = await norm.normalize_drugs(["augmentin 625 duo tablet"])
+    assert unresolved == []
+    d = drugs[0]
+    assert len(d.components) == 2
+    assert set(d.component_rxcuis) == set(d.components)
+    a, b = d.components
+    assert d.component_rxcuis[a] != d.component_rxcuis[b]
+    assert d.rxcui_for(a) == d.component_rxcuis[a]
+    assert d.rxcui_for(b) == d.component_rxcuis[b]
+    assert set(seen) >= set(d.components)
 
 
 def test_rxnav_picker_skips_nameless_hits():

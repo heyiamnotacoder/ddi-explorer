@@ -25,6 +25,7 @@ export interface NormalizedDrug {
   generic_name?: string | null;
   rxcui?: string | null;
   components: string[];
+  component_rxcuis?: Record<string, string>;
   resolved_via?: string | null;
 }
 
