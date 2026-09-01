@@ -8,18 +8,36 @@ from __future__ import annotations
 import litellm
 
 from ..config import get_settings
+from ..pipeline import scrubber
 
 litellm.drop_params = True  # tolerate provider-specific param mismatches
+
+
+def _gate_reasoning_messages(messages: list[dict]) -> list[dict]:
+    """Last-chance PHI strip. Regex-only so pair synthesizers skip spaCy."""
+    gated = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, str):
+            gated.append({**m, "content": scrubber.for_reasoning_llm(
+                content, use_ner=False) or ""})
+        else:
+            gated.append(m)
+    return gated
 
 
 async def complete(messages: list[dict], *, model: str | None = None,
                    temperature: float = 0.0, max_tokens: int = 2000,
                    response_format: dict | None = None) -> str:
-    """Plain chat completion. Returns assistant text."""
+    """Plain chat completion. Returns assistant text.
+
+    Every string in `messages` is scrubbed before it leaves this function.
+    Vision stays on complete_vision (image-level redaction is not v1).
+    """
     settings = get_settings()
     kwargs: dict = {
         "model": model or settings.llm_model,
-        "messages": messages,
+        "messages": _gate_reasoning_messages(messages),
         "temperature": temperature,
         "max_tokens": max_tokens,
     }

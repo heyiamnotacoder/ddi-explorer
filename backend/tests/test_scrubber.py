@@ -1,5 +1,5 @@
 """Scrubber tests — the privacy guarantees of the whole app live here."""
-from app.pipeline.scrubber import scrub_text
+from app.pipeline.scrubber import for_reasoning_llm, scrub_text
 
 
 def test_patient_identifiers_removed():
@@ -41,3 +41,19 @@ def test_empty_and_clean_text():
     assert scrub_text("").text == ""
     r = scrub_text("warfarin 5 mg + aspirin 75 mg")
     assert r.text == "warfarin 5 mg + aspirin 75 mg"
+
+
+def test_for_reasoning_llm_strips_phone_and_mrn():
+    out = for_reasoning_llm(
+        "Call 9876543210, MRN: AIIMS-20451. Age 56, CrCl 42.")
+    assert out is not None
+    assert "9876543210" not in out
+    assert "AIIMS-20451" not in out
+    assert "Age 56" in out and "CrCl 42" in out
+    assert "[PHONE_" in out and "[MRN_" in out
+
+
+def test_for_reasoning_llm_blank_is_none():
+    assert for_reasoning_llm(None) is None
+    assert for_reasoning_llm("") is None
+    assert for_reasoning_llm("   ") is None

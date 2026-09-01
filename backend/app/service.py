@@ -35,6 +35,32 @@ DISCLAIMER = (
 )
 
 
+def _labeled_section(blob: str, label: str) -> str | None:
+    """Slice an already-scrubbed joined blob after a 'Label:' line."""
+    lines: list[str] = []
+    capture = False
+    for line in blob.splitlines():
+        if line.startswith(label):
+            capture = True
+            rest = line[len(label):].strip()
+            if rest:
+                lines.append(rest)
+            continue
+        if capture:
+            if line.startswith("Timing:"):
+                break
+            lines.append(line)
+    text = "\n".join(lines).strip()
+    return text or None
+
+
+def _patient_ctx_for_llm(extracted: dict, scrubbed_blob: str) -> str | None:
+    """Patient notes for waterfall. Never raw request fields."""
+    raw = extracted.get("patient_context") or _labeled_section(
+        scrubbed_blob, "Patient context:")
+    return scrubber.for_reasoning_llm(raw)
+
+
 def _dedupe_pairs(pairs: list[PairResult]) -> list[PairResult]:
     """Keep one result per unordered component pair; prefer a stronger grade."""
     rank = {Grade.A: 0, Grade.B: 1, Grade.C: 2, None: 3}
@@ -73,7 +99,7 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     # 3) Structured extraction (first LLM contact; input is clean)
     extracted = await extract.extract_drugs(scrubbed.text)
     drug_names = [d["name"] for d in extracted["drugs"] if d.get("name")]
-    patient_ctx = req.patient_context or extracted.get("patient_context")
+    patient_ctx = _patient_ctx_for_llm(extracted, scrubbed.text)
 
     # 4) Normalize (local Indian dataset -> RxNav -> unresolved)
     normalized, unresolved = await norm.normalize_drugs(drug_names)
@@ -157,12 +183,8 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
     3. LLM proposes same-indication substitutes for those drugs only.
     4. Recheck each substitute against the rest of the list.
     """
-    ctx = None
-    if req.patient_context:
-        ctx = scrubber.scrub_text(req.patient_context).text
-    rx_text = None
-    if req.scrubbed_text:
-        rx_text = scrubber.scrub_text(req.scrubbed_text).text
+    ctx = scrubber.for_reasoning_llm(req.patient_context)
+    rx_text = scrubber.for_reasoning_llm(req.scrubbed_text)
 
     candidates = alts.pick_candidates(req.normalized_drugs, req.pairs)
     keep = alts.keep_list(req.normalized_drugs, req.pairs, candidates)

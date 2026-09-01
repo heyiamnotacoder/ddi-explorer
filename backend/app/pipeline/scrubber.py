@@ -1,11 +1,8 @@
 """PHI scrubber — runs AFTER OCR, BEFORE anything reaches an LLM.
 
-Uses Presidio (spaCy NER + regex recognizers). Every piece of text —
-typed input, OCR output, patient context — goes through scrub_text()
-before the agent or any external LLM call sees it.
-
-Clinical context (age, sex, weight, creatinine, conditions) is preserved;
-only identifiers are removed.
+Uses Presidio (spaCy NER + regex recognizers). Intake uses scrub_text();
+reasoning completions must go through for_reasoning_llm() (also applied
+inside agent.llm.complete). Clinical numbers stay; identifiers go.
 """
 from __future__ import annotations
 
@@ -121,6 +118,14 @@ def _presidio_scan(text: str) -> list[tuple[int, int, str]]:
             continue  # keep relative dosing info, drop only absolute dates
         spans.append((r.start, r.end, r.entity_type))
     return spans
+
+
+def for_reasoning_llm(text: str | None, *, use_ner: bool = True) -> str | None:
+    """The only text a reasoning LLM may see. None/blank stays None."""
+    if text is None:
+        return None
+    cleaned = scrub_text(str(text), use_ner=use_ner).text
+    return cleaned if cleaned.strip() else None
 
 
 def scrub_text(text: str, use_ner: bool = True) -> ScrubResult:
