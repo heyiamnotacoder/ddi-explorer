@@ -1,11 +1,19 @@
 """Central configuration. Everything env-driven, provider-agnostic."""
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Always backend/.env, even if uvicorn is started from the repo root.
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_BACKEND_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # Reasoning LLM (litellm model string — swap providers freely)
     # e.g. "deepseek/deepseek-v4-flash", "anthropic/claude-sonnet-5", "openai/gpt-4o"

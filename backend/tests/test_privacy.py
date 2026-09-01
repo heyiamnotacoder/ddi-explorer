@@ -160,6 +160,16 @@ async def test_alternatives_cannot_be_pointed_at_raw_notes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_complete_scrubs_reasoning_prompts(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(llm, "get_settings", lambda: SimpleNamespace(
+        llm_model="anthropic/claude-sonnet-5",
+        vision_model="anthropic/claude-sonnet-5",
+        anthropic_api_key="sk-ant-test",
+        deepseek_api_key=None,
+        openai_api_key=None,
+        gemini_api_key=None,
+    ))
     outbound: list = []
 
     class _Msg:

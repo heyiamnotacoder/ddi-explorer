@@ -6,13 +6,48 @@ Vision model is a SEPARATE setting — DeepSeek is text-only.
 from __future__ import annotations
 
 import json
+import os
 
 import litellm
 
-from ..config import get_settings
+from ..config import Settings, get_settings
 from ..pipeline import scrubber
 
 litellm.drop_params = True  # tolerate provider-specific param mismatches
+
+
+class LLMConfigError(RuntimeError):
+    """Missing provider key — fail immediately, do not hang on the vendor."""
+
+
+def _provider_key(model: str, settings: Settings) -> tuple[str, str | None]:
+    """Return (env var name, key from settings) for a litellm model string."""
+    m = (model or "").lower()
+    if m.startswith("anthropic/") or m.startswith("claude"):
+        return "ANTHROPIC_API_KEY", settings.anthropic_api_key
+    if m.startswith("deepseek"):
+        return "DEEPSEEK_API_KEY", settings.deepseek_api_key
+    if m.startswith("openai/") or m.startswith("gpt-"):
+        return "OPENAI_API_KEY", settings.openai_api_key
+    if m.startswith("gemini") or m.startswith("google"):
+        return "GEMINI_API_KEY", settings.gemini_api_key
+    return "", None
+
+
+def _auth_kwargs(model: str, settings: Settings) -> dict:
+    """Pass the settings key into LiteLLM; do not rely on process env."""
+    env_name, key = _provider_key(model, settings)
+    if env_name and not key:
+        raise LLMConfigError(
+            f"No API key configured for {model}. "
+            f"Set {env_name} in backend/.env — uvicorn loads it; no shell export needed."
+        )
+    extra: dict = {}
+    if key:
+        extra["api_key"] = key
+        if env_name and not os.environ.get(env_name):
+            os.environ[env_name] = key
+    return extra
 
 
 def parse_json_object(text: str | None) -> dict:
@@ -51,11 +86,13 @@ async def complete(messages: list[dict], *, model: str | None = None,
     Vision stays on complete_vision (image-level redaction is not v1).
     """
     settings = get_settings()
+    chosen = model or settings.llm_model
     kwargs: dict = {
-        "model": model or settings.llm_model,
+        "model": chosen,
         "messages": _gate_reasoning_messages(messages),
         "temperature": temperature,
         "max_tokens": max_tokens,
+        **_auth_kwargs(chosen, settings),
     }
     if response_format:
         kwargs["response_format"] = response_format
@@ -73,5 +110,6 @@ async def complete_vision(prompt: str, image_data_urls: list[str]) -> str:
         messages=[{"role": "user", "content": content}],
         temperature=0.0,
         max_tokens=3000,
+        **_auth_kwargs(settings.vision_model, settings),
     )
     return resp.choices[0].message.content or ""
