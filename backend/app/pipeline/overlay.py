@@ -1,8 +1,9 @@
-"""Deterministic overlay for local Grade A pairs.
+"""Deterministic overlay for Grade A pairs that skipped the synthesizer.
 
-RxNav hits skip the synthesizer. This module attaches timing-separable
-category, missing-dose copy, and patient/severe-if notes from already
-scrubbed extract fields — never from raw request text, never via LLM.
+RxNav (`local`) and openFDA partner-mention hits skip the synthesizer.
+This module attaches timing-separable category, missing-dose copy, and
+patient/severe-if notes from already scrubbed extract fields — never from
+raw request text, never via LLM.
 """
 from __future__ import annotations
 
@@ -68,10 +69,10 @@ def apply(
     drugs: list[NormalizedDrug],
     patient_ctx: str | None,
 ) -> list[PairResult]:
-    """Fill overlay fields on local Grade A pairs. Other pairs pass through."""
+    """Fill overlay fields on local/openFDA Grade A pairs. Other pairs pass through."""
     out: list[PairResult] = []
     for p in pairs:
-        if p.source_tier == "local" and p.grade == Grade.A:
+        if p.grade == Grade.A and p.source_tier in ("local", "openfda"):
             out.append(_overlay_one(p, drugs, patient_ctx))
         else:
             out.append(p)

@@ -1,6 +1,6 @@
 """The single linear agent: per-pair evidence waterfall with early exit.
 
-  1. openFDA labels      -> found -> Grade A, STOP
+  1. openFDA labels      -> partner named in snippet -> Grade A, no LLM, STOP
   2. PubMed + CT.gov     -> human RCT/PK/meta that support a DDI -> Grade B, STOP
                             (case reports withheld; negative/absent strong
                             evidence falls through to tier 3)
@@ -264,6 +264,42 @@ def _error_pair(a: str, b: str, reason: str) -> PairResult:
     )
 
 
+def _label_text_mentions_pair(text: str, a: str, b: str) -> bool:
+    aliases = tools._label_aliases(a) + tools._label_aliases(b)
+    return tools._first_mention(text or "", aliases) is not None
+
+
+def _pair_from_labels(a: str, b: str, fda: list[dict]) -> PairResult | None:
+    """Grade A from a partner mention on a retrieved label. No synthesizer."""
+    usable: list[dict] = []
+    for rec in fda:
+        blob = rec.get("interactions_text") or ""
+        if not _label_text_mentions_pair(blob, a, b):
+            continue
+        if not rec.get("setid"):
+            continue
+        usable.append(rec)
+    if not usable:
+        return None
+    cites = _citations_from(
+        [str(rec["setid"]) for rec in usable], usable, "openfda")
+    if not cites:
+        return None
+    blob = " ".join(rec.get("interactions_text") or "" for rec in usable)
+    contra = any(rec.get("label_contraindicated") for rec in usable) or (
+        "contraindicat" in blob.lower())
+    cat = Category.CONTRAINDICATED if contra else Category.INTERACTION
+    return PairResult(
+        drugs=(a, b),
+        grade=Grade.A,
+        category=cat,
+        severity="major" if contra else "moderate",
+        summary=blob[:800],
+        citations=cites,
+        source_tier="openfda",
+    )
+
+
 async def evaluate_pair(drug_a: str, drug_b: str,
                         patient_context: str | None = None) -> PairResult:
     a, b = drug_a.lower(), drug_b.lower()
@@ -281,11 +317,9 @@ async def evaluate_pair(drug_a: str, drug_b: str,
 async def _hunt_pair(a: str, b: str, patient_context: str | None) -> PairResult:
     # ---- Tier 1: openFDA labels -------------------------------------------
     fda = await tools.openfda_label_check(a, b)
-    if fda:
-        s = await _synthesize(a, b, "approved FDA labeling (Grade A)", fda, patient_context)
-        return _verdict_result(a, b, s, Grade.A,
-                               _citations_from(s.get("cited", []), fda, "openfda"),
-                               "openfda", pool=fda)
+    labeled = _pair_from_labels(a, b, fda)
+    if labeled is not None:
+        return labeled
 
     # ---- Tier 2: PubMed + ClinicalTrials.gov (parallel) -------------------
     pubs, trials = await asyncio.gather(

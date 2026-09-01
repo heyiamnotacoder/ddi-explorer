@@ -139,9 +139,6 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     known_results, unknown_pairs = await prefilter.check_known_pairs(
         [n for n in normalized if n.components]
     )
-    known_results = overlay.apply(
-        known_results, drugs=normalized, patient_ctx=patient_ctx,
-    )
 
     # 6) Agent waterfall for unknown pairs only (local pairs never enter)
     agent_results = (
@@ -150,7 +147,10 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     )
 
     # 7) Assemble (dedupe in case RxNav names and waterfall names collide)
-    all_pairs = _dedupe_pairs(known_results + agent_results)
+    all_pairs = overlay.apply(
+        _dedupe_pairs(known_results + agent_results),
+        drugs=normalized, patient_ctx=patient_ctx,
+    )
     banner = [p for p in all_pairs if p.category == Category.CONTRAINDICATED]
     insufficient = [p.drugs for p in all_pairs if p.source_tier == "insufficient"]
 
@@ -199,16 +199,17 @@ async def _recheck_against_rest(
     alt = normalized[0]
     new_keys = {c.lower() for c in alt.components}
     known, unknown = await prefilter.check_known_pairs(remaining + [alt])
-    known = overlay.apply(
-        known, drugs=remaining + [alt], patient_ctx=patient_ctx,
-    )
     known = _pairs_involving(known, new_keys)
     unknown = [
         (a, b) for a, b in unknown
         if a.lower() in new_keys or b.lower() in new_keys
     ]
     agent = await waterfall.evaluate_pairs(unknown, patient_ctx) if unknown else []
-    return _dedupe_pairs(known + agent), alt.components, None
+    graded = overlay.apply(
+        _dedupe_pairs(known + agent),
+        drugs=remaining + [alt], patient_ctx=patient_ctx,
+    )
+    return graded, alt.components, None
 
 
 async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:

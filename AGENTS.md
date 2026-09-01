@@ -182,7 +182,8 @@ Match on RxCUI so Indian spellings (`amoxycillin`) still hit.
 A deterministic overlay (`pipeline/overlay.py`) then fills `category=timing`
 (separable admin), `dose_condition` (missing dose on a dose-dependent pair),
 and `patient_specific_note` / `severe_if` from extracted dose/schedule plus
-**scrubbed** patient notes. No synthesizer call.
+**scrubbed** patient notes on Grade A `local` and `openfda` pairs. No
+synthesizer call.
 
 ### 6. Waterfall — `agent/waterfall.py`
 
@@ -201,7 +202,10 @@ first 3000 characters (highlights TOC). INN/USAN aliases: rifampicin/rifampin,
 paracetamol/acetaminophen, amoxycillin/amoxicillin; isosorbide* also matches
 `nitrate`/`nitrates`. Citation id is `set_id` or `openfda.spl_set_id`, stored
 as `setid`. No partner/alias in the window → not a hit; the waterfall continues
-to PubMed.
+to PubMed. A partner mention with a mapped `setid` is Grade A with **no
+synthesizer**; `contraindicat` in that snippet/CI/boxed warning sets
+`category=contraindicated` (banner). Overlay then fills dose/timing/patient
+notes the same way as RxNav local hits.
 
 Hard rules (also in the synthesizer prompt):
 
@@ -376,7 +380,7 @@ citations never earn a grade; invented PMIDs never appear.
 `backend/tests/test_waterfall_grades.py` — human PK grades B; case report vs
 negative trial is C with `evidence_conflict`; unfetched URLs are not citations.
 
-`backend/tests/test_overlay.py` — local Grade A pairs get timing / missing-dose
+`backend/tests/test_overlay.py` — local/openFDA Grade A pairs get timing / missing-dose
 copy / patient notes without a synthesizer call; extract dose and schedule
 survive on `NormalizedDrug`.
 

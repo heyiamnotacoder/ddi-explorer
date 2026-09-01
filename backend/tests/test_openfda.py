@@ -237,8 +237,13 @@ async def test_substance_check_uses_set_id(monkeypatch):
 async def test_citation_gate_still_rejects_invented_setid(monkeypatch):
     import json
 
-    async def fake_fda(*_a, **_k):
-        return [{"setid": "abc", "title": "label", "url": "https://dailymed/abc"}]
+    async def fake_fda(a, b):
+        return [{
+            "setid": "abc",
+            "title": "label",
+            "url": "https://dailymed/abc",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     async def fake_complete(*_a, **_k):
         return json.dumps({
@@ -253,6 +258,8 @@ async def test_citation_gate_still_rejects_invented_setid(monkeypatch):
         "app.agent.waterfall.tools.openfda_label_check", fake_fda)
     monkeypatch.setattr("app.agent.waterfall.llm.complete", fake_complete)
     result = await evaluate_pair("warfarin", "amiodarone")
-    assert result.grade is None
-    assert result.source_tier == "insufficient"
-    assert result.citations == []
+    assert result.grade == Grade.A
+    assert result.source_tier == "openfda"
+    assert [c.identifier for c in result.citations] == ["abc"]
+    blob = json.dumps(result.model_dump())
+    assert "not-a-real-id" not in blob

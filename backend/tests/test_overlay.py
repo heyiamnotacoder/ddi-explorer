@@ -130,18 +130,19 @@ def test_absent_patient_context_lists_severe_if():
     assert out[0].severe_if
 
 
-def test_waterfall_pairs_are_not_overwritten():
+def test_openfda_grade_a_is_overlaid_like_local():
     p = PairResult(
-        drugs=("warfarin", "omeprazole"), grade=Grade.A,
-        category=Category.INTERACTION, summary="from synthesizer",
-        source_tier="openfda", dose_condition="keep me",
-        patient_specific_note="synth note", severe_if=["x"],
+        drugs=("warfarin", "amiodarone"), grade=Grade.A,
+        category=Category.INTERACTION, summary="Labelled interaction.",
+        source_tier="openfda",
     )
-    out = apply([p], drugs=[_drug("warfarin"), _drug("omeprazole")],
+    out = apply([p], drugs=[_drug("warfarin"), _drug("amiodarone")],
                 patient_ctx="Age 80")
-    assert out[0].dose_condition == "keep me"
-    assert out[0].patient_specific_note == "synth note"
-    assert out[0].severe_if == ["x"]
+    assert out[0].patient_specific_note
+    assert "age 80" in out[0].patient_specific_note.lower()
+    assert out[0].severe_if == []
+    assert out[0].grade == Grade.A
+    assert out[0].source_tier == "openfda"
 
 
 @pytest.mark.asyncio

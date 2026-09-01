@@ -47,7 +47,11 @@ async def test_identical_pairs_hunt_once(monkeypatch):
 
     async def fake_fda(a, b):
         calls.append((a, b))
-        return [{"setid": "set-1", "title": "label", "url": "https://dailymed/set-1"}]
+        return [{
+            "setid": "set-1", "title": "label",
+            "url": "https://dailymed/set-1",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     _patch_fda(monkeypatch, fake_fda)
     _patch_synth(monkeypatch, _grade_a())
@@ -67,7 +71,11 @@ async def test_cache_hit_same_grade_no_second_fetch(monkeypatch):
 
     async def fake_fda(a, b):
         calls.append((a, b))
-        return [{"setid": "set-1", "title": "label", "url": "https://dailymed/set-1"}]
+        return [{
+            "setid": "set-1", "title": "label",
+            "url": "https://dailymed/set-1",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     _patch_fda(monkeypatch, fake_fda)
     _patch_synth(monkeypatch, _grade_a())
@@ -82,8 +90,12 @@ async def test_cache_hit_same_grade_no_second_fetch(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cache_does_not_store_patient_text(monkeypatch):
-    async def fake_fda(*_a, **_k):
-        return [{"setid": "set-1", "title": "label", "url": "https://dailymed/set-1"}]
+    async def fake_fda(a, b):
+        return [{
+            "setid": "set-1", "title": "label",
+            "url": "https://dailymed/set-1",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     _patch_fda(monkeypatch, fake_fda)
     _patch_synth(monkeypatch, _grade_a(patient_specific_note=PHI))
@@ -91,7 +103,8 @@ async def test_cache_does_not_store_patient_text(monkeypatch):
     live = await evaluate_pair(
         "warfarin", "amiodarone", patient_context=PHI,
     )
-    assert live.patient_specific_note == PHI
+    # Label Grade A skips the synthesizer; overlay (service) adds notes later.
+    assert live.patient_specific_note is None
     blob = pair_cache.payload_text()
     assert PHI not in blob
     assert "9876543210" not in blob
@@ -131,7 +144,11 @@ async def test_429_one_pair_others_still_return(monkeypatch):
     async def fake_fda(a, b):
         if "amiodarone" in (a, b):
             raise tools.ToolRateLimit("openfda")
-        return [{"setid": "set-1", "title": "label", "url": "https://dailymed/set-1"}]
+        return [{
+            "setid": "set-1", "title": "label",
+            "url": "https://dailymed/set-1",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     _patch_fda(monkeypatch, fake_fda)
     _patch_synth(monkeypatch, _grade_a())
@@ -155,7 +172,11 @@ async def test_one_pair_exception_does_not_fail_request(monkeypatch):
     async def fake_fda(a, b):
         if "explode" in (a, b):
             raise RuntimeError("boom")
-        return [{"setid": "set-1", "title": "label", "url": "https://dailymed/set-1"}]
+        return [{
+            "setid": "set-1", "title": "label",
+            "url": "https://dailymed/set-1",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     _patch_fda(monkeypatch, fake_fda)
     _patch_synth(monkeypatch, _grade_a())

@@ -252,12 +252,14 @@ def _label_hit(rec: dict, subject: str, aliases: list[str],
     openfda = rec.get("openfda") or {}
     names = openfda.get("generic_name") or [subject]
     title_name = names[0] if names else subject
+    ci_blob = _join_fields(rec, ("contraindications", "boxed_warning"))
     return {
         "subject_drug": subject,
         "title": f"{title_name} labeling",
         "interactions_text": snippet,
         "setid": setid,
         "url": _dailymed_url(setid, subject),
+        "label_contraindicated": "contraindicat" in f"{snippet} {ci_blob}".lower(),
     }
 
 

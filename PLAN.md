@@ -95,7 +95,7 @@ transcription-only and is allowed to see the raw image in v1.
 For each unresolved pair (Drug A, Drug B):
 
 ```
-1. openfda_label_check ──usable partner snippet (DI/CI/boxed; aliases)──▶ Grade A → DONE, stop
+1. openfda_label_check ──usable partner snippet (DI/CI/boxed; aliases)──▶ Grade A, no synthesizer → DONE, stop
         │ no partner mention / empty window
 2. pubmed_search + clinicaltrials_search (RCT/PK/meta)
         │ ──supports DDI──▶ Grade B → DONE, stop

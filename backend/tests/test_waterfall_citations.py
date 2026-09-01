@@ -113,7 +113,22 @@ def test_none_verdict_never_graded():
 @pytest.mark.asyncio
 async def test_evaluate_pair_invented_pmid_is_insufficient(monkeypatch):
     async def fake_fda(*_a, **_k):
-        return [{"setid": "abc", "title": "label", "url": "https://dailymed/abc"}]
+        return []
+
+    async def fake_pubmed(*_a, **_k):
+        return [{
+            "pmid": "12345",
+            "title": "A trial",
+            "pubtype": ["Randomized Controlled Trial"],
+            "abstract": "Interaction observed.",
+            "url": "https://pubmed.ncbi.nlm.nih.gov/12345/",
+        }]
+
+    async def fake_ct(*_a, **_k):
+        return []
+
+    async def fake_web(*_a, **_k):
+        return []
 
     async def fake_complete(*_a, **_k):
         return json.dumps({
@@ -126,33 +141,31 @@ async def test_evaluate_pair_invented_pmid_is_insufficient(monkeypatch):
 
     monkeypatch.setattr(
         "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    monkeypatch.setattr("app.agent.waterfall.tools.pubmed_search", fake_pubmed)
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.clinicaltrials_search", fake_ct)
+    monkeypatch.setattr("app.agent.waterfall.tools.web_search", fake_web)
     monkeypatch.setattr("app.agent.waterfall.llm.complete", fake_complete)
 
     result = await evaluate_pair("warfarin", "amiodarone")
     assert result.grade is None
     assert result.source_tier == "insufficient"
-    assert result.citations == []
     blob = json.dumps(result.model_dump())
     assert "99999999" not in blob
 
 
 @pytest.mark.asyncio
 async def test_evaluate_pair_mapped_setid_keeps_grade_a(monkeypatch):
-    async def fake_fda(*_a, **_k):
-        return [{"setid": "abc", "title": "label", "url": "https://dailymed/abc"}]
-
-    async def fake_complete(*_a, **_k):
-        return json.dumps({
-            "verdict": "interaction",
-            "summary": "Labelled interaction.",
-            "cited": ["abc"],
-            "category": "interaction",
-            "severity": "major",
-        })
+    async def fake_fda(a, b):
+        return [{
+            "setid": "abc",
+            "title": "label",
+            "url": "https://dailymed/abc",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
 
     monkeypatch.setattr(
         "app.agent.waterfall.tools.openfda_label_check", fake_fda)
-    monkeypatch.setattr("app.agent.waterfall.llm.complete", fake_complete)
 
     result = await evaluate_pair("warfarin", "amiodarone")
     assert result.grade == Grade.A
