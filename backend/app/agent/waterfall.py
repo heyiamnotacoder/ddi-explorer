@@ -1,9 +1,12 @@
 """The single linear agent: per-pair evidence waterfall with early exit.
 
   1. openFDA labels      -> found -> Grade A, STOP
-  2. PubMed + CT.gov     -> human RCT/PK/meta -> Grade B, STOP
-                            (only case reports? carry them down to tier 3)
-  3. Web search          -> case reports / weak evidence -> Grade C
+  2. PubMed + CT.gov     -> human RCT/PK/meta that support a DDI -> Grade B, STOP
+                            (case reports withheld; negative/absent strong
+                            evidence falls through to tier 3)
+  3. Case reports + fetched web pages -> Grade C
+     Conflict (case report vs absent/negative trial) stays C and is disclosed.
+     Search URLs are not citations until web_fetch returns content.
   4. nothing             -> "No DDI found"
 
 Anti-hallucination rule: the LLM may ONLY cite records handed to it by a
@@ -13,18 +16,48 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from ..config import get_settings
 from ..models import Category, Citation, Grade, PairResult
 from . import llm, tools
+
+_STRONG_PUBTYPES = (
+    "Randomized Controlled Trial",
+    "Clinical Trial",
+    "Controlled Clinical Trial",
+    "Pragmatic Clinical Trial",
+    "Equivalence Trial",
+    "Meta-Analysis",
+    "Systematic Review",
+    "Clinical Study",
+)
+_WEAK_PUBTYPES = ("Case Reports", "Letter", "Comment", "Editorial")
+_PK_RE = re.compile(
+    r"\bpharmacokinet|\bcoadministration study\b|\bdrug[- ]drug interaction study\b",
+    re.I,
+)
+_CASE_RE = re.compile(r"\bcase reports?\b", re.I)
+_MAX_WEB_FETCHES = 3
+_CONFLICT_NEGATIVE = (
+    "Case reports suggest an interaction; retrieved trial or PK evidence "
+    "does not confirm it (absent or negative)."
+)
+_CONFLICT_ABSENT = (
+    "Case reports suggest an interaction; no confirmatory human trial or "
+    "PK study was retrieved."
+)
 
 SYSTEM = """You are a clinical pharmacology evidence grader for drug-drug interactions.
 
 HARD RULES:
 - Cite ONLY records provided to you in this conversation (by PMID, NCT ID, or URL). Never invent citations.
 - If provided evidence does not support an interaction, say so — do not extrapolate silently.
-- If evidence conflicts (e.g., RCT negative but case reports positive), grade by the STRONGEST human
-  evidence tier available and disclose the conflict in "evidence_conflict".
+- Human PK / coadministration studies are Grade B when they are the strongest retrieved human evidence.
+- If evidence conflicts (positive case report plus absent or negative trial/PK evidence), verdict is
+  interaction at Grade C and you MUST fill evidence_conflict. Do not upgrade that conflict to B.
+- Cite ONLY identifiers in the retrieved records. Web pages count only when page content was fetched;
+  a search snippet or unfetched URL is not evidence.
 - If a dose threshold matters and the dose is unknown, phrase conditionally:
   "DDI possible if <drug> dose > X mg".
 - If the pair is manageable by separating administration timing (e.g., divalent cations +
@@ -146,6 +179,80 @@ def _verdict_result(a: str, b: str, s: dict, grade: Grade | None,
     )
 
 
+def _is_case_report(rec: dict) -> bool:
+    types = rec.get("pubtype") or []
+    if any(t in _WEAK_PUBTYPES for t in types):
+        return True
+    blob = f"{rec.get('title', '')} {rec.get('abstract', '')}"
+    return bool(_CASE_RE.search(blob))
+
+
+def _is_pk_study(rec: dict) -> bool:
+    """Human PK / coadministration study. Case reports never count as PK-B."""
+    if _is_case_report(rec):
+        return False
+    blob = f"{rec.get('title', '')} {rec.get('abstract', '')}"
+    return bool(_PK_RE.search(blob))
+
+
+def _is_strong_human(rec: dict) -> bool:
+    """RCT / clinical trial / meta / systematic review / human PK."""
+    if _is_case_report(rec):
+        return False
+    types = rec.get("pubtype") or []
+    if any(t in _STRONG_PUBTYPES for t in types):
+        return True
+    return _is_pk_study(rec)
+
+
+def split_pubmed(pubs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(strong human evidence, leftover case reports / other)."""
+    strong: list[dict] = []
+    weak: list[dict] = []
+    for rec in pubs:
+        if _is_strong_human(rec):
+            strong.append(rec)
+        else:
+            weak.append(rec)
+    return strong, weak
+
+
+async def _fetched_web(hits: list[dict]) -> list[dict]:
+    """Fetch search hits. Unfetched URLs never enter the citation pool."""
+    chosen = [h for h in hits if str(h.get("url") or "").strip()][:_MAX_WEB_FETCHES]
+    if not chosen:
+        return []
+    bodies = await asyncio.gather(
+        *(tools.web_fetch(str(h["url"])) for h in chosen))
+    out: list[dict] = []
+    for hit, body in zip(chosen, bodies):
+        text = (body or "").strip()
+        if not text:
+            continue
+        out.append({
+            "title": hit.get("title") or "web page",
+            "url": str(hit["url"]),
+            "snippet": hit.get("snippet", ""),
+            "content": text[:4000],
+        })
+    return out
+
+
+def _with_conflict(result: PairResult, text: str) -> PairResult:
+    if result.grade != Grade.C or result.evidence_conflict:
+        return result
+    return result.model_copy(update={"evidence_conflict": text})
+
+
+def _none_pair(a: str, b: str) -> PairResult:
+    return PairResult(
+        drugs=(a, b), grade=None, category=Category.NONE,
+        summary=f"No documented interaction found between {a} and {b} "
+                f"(checked labeling, trials, and literature).",
+        source_tier="none",
+    )
+
+
 async def evaluate_pair(drug_a: str, drug_b: str,
                         patient_context: str | None = None) -> PairResult:
     a, b = drug_a.lower(), drug_b.lower()
@@ -161,42 +268,66 @@ async def evaluate_pair(drug_a: str, drug_b: str,
     # ---- Tier 2: PubMed + ClinicalTrials.gov (parallel) -------------------
     pubs, trials = await asyncio.gather(
         tools.pubmed_search(a, b), tools.clinicaltrials_search(a, b))
-    strong = [p for p in pubs if any(
-        t in ("Randomized Controlled Trial", "Clinical Trial", "Meta-Analysis",
-              "Systematic Review")
-        for t in p.get("pubtype", []))] + trials
+    strong_pubs, weak_pubs = split_pubmed(pubs)
+    strong = strong_pubs + list(trials)
 
+    b_result: PairResult | None = None
     if strong:
-        s = await _synthesize(a, b, "human trial/PK literature (Grade B)", strong,
-                              patient_context)
-        return _verdict_result(
+        s = await _synthesize(
+            a, b,
+            "human trial/PK literature (Grade B). These records are RCT, PK, "
+            "meta, systematic review, or registered trials. Case reports are "
+            "withheld. If they do not support a clinically meaningful "
+            "interaction, verdict=none or insufficient.",
+            strong, patient_context)
+        b_result = _verdict_result(
             a, b, s, Grade.B,
-            (_citations_from(s.get("cited", []), pubs, "pubmed")
+            (_citations_from(s.get("cited", []), strong_pubs, "pubmed")
              + _citations_from(s.get("cited", []), trials, "clinicaltrials")),
-            "pubmed_ct", pool=pubs + trials)
+            "pubmed_ct", pool=strong)
+        if b_result.grade == Grade.B:
+            return b_result
 
-    # ---- Tier 3: weak evidence (case reports etc.) ------------------------
-    weak_pool = [p for p in pubs if p]  # case reports etc. from the same PubMed search
-    web = await tools.web_search(
+    # ---- Tier 3: weak evidence (case reports + fetched pages only) --------
+    web_hits = await tools.web_search(
         f"{a} {b} drug interaction case report")
-    weak_pool += web
+    fetched = await _fetched_web(web_hits)
+    weak_only = list(weak_pubs) + list(fetched)
+    if not weak_only:
+        return b_result if b_result is not None else _none_pair(a, b)
 
-    if weak_pool:
-        s = await _synthesize(a, b, "weak evidence only: case reports / unverified "
-                                    "(Grade C)", weak_pool, patient_context)
-        return _verdict_result(
-            a, b, s, Grade.C,
-            (_citations_from(s.get("cited", []), pubs, "pubmed")
-             + _citations_from(s.get("cited", []), web, "web")),
-            "web", pool=weak_pool)
+    weak_pool = list(weak_only)
+    if b_result is not None and b_result.grade != Grade.B:
+        weak_pool = list(strong) + weak_pool
 
-    # ---- Nothing found -----------------------------------------------------
-    return PairResult(
-        drugs=(a, b), grade=None, category=Category.NONE,
-        summary=f"No documented interaction found between {a} and {b} "
-                f"(checked labeling, trials, and literature).",
-        source_tier="none",
+    s = await _synthesize(
+        a, b,
+        "weak evidence: case reports and fetched pages (Grade C). "
+        "If trial/PK evidence is absent or negative alongside a positive "
+        "case report, verdict=interaction at Grade C and fill "
+        "evidence_conflict. Do not cite unfetched URLs.",
+        weak_pool, patient_context)
+    cited = s.get("cited", [])
+    cites = (
+        _citations_from(cited, pubs, "pubmed")
+        + _citations_from(cited, trials, "clinicaltrials")
+        + _citations_from(cited, fetched, "web")
     )
+    conflict_text = _CONFLICT_NEGATIVE if strong else _CONFLICT_ABSENT
+    disclose = not strong or (b_result is not None and b_result.grade != Grade.B)
+    if disclose and cites and s.get("verdict") != "interaction":
+        s = {
+            **s,
+            "verdict": "interaction",
+            "summary": s.get("summary") or conflict_text,
+            "evidence_conflict": s.get("evidence_conflict") or conflict_text,
+            "category": s.get("category") or "interaction",
+        }
+    result = _verdict_result(
+        a, b, s, Grade.C, cites, "web", pool=weak_pool)
+    if disclose:
+        result = _with_conflict(result, conflict_text)
+    return result
 
 
 async def evaluate_pairs(pairs: list[tuple[str, str]],

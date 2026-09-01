@@ -97,13 +97,15 @@ For each unresolved pair (Drug A, Drug B):
 1. openfda_label_check ──found──▶ Grade A → DONE, stop
         │ not found
 2. pubmed_search + clinicaltrials_search (RCT/PK/meta)
-        │ ──found──▶ Grade B → DONE, stop
-        │ not found
-3. web_search for weak evidence (case reports etc.)
-        │ ──found──▶ Grade C → DONE
+        │ ──supports DDI──▶ Grade B → DONE, stop
+        │ ──negative/absent + no case reports──▶ none / insufficient
+        │ ──negative/absent + case reports──▶ continue
+3. leftover case reports + web_search URLs that web_fetch actually retrieved
+        │ ──found──▶ Grade C → DONE (conflict disclosed if trials absent/negative)
         │ nothing
 4. "No DDI found" for this pair
 ```
+Unfetched search hits are not citations.
 
 ---
 

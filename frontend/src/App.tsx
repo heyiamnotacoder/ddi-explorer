@@ -118,20 +118,29 @@ function SuggestionCard({ s }: { s: AlternativeSuggestion }) {
 
 function PairCard({ p }: { p: PairResult }) {
   const kind = isInsufficient(p) ? "insufficient" : p.category;
+  const conflict = Boolean(p.evidence_conflict);
   return (
-    <article id={`pair-${pairKey(p.drugs[0], p.drugs[1])}`} className={`pair ${kind}`}>
+    <article
+      id={`pair-${pairKey(p.drugs[0], p.drugs[1])}`}
+      className={`pair ${kind}${conflict ? " has-conflict" : ""}`}
+    >
       <div className="pair-top">
         <h4>{p.drugs[0]} + {p.drugs[1]}</h4>
         <div className="pair-meta">
           {p.severity && <span className="sev">{p.severity}</span>}
           <GradePill grade={p.grade} category={p.category} sourceTier={p.source_tier} />
+          {conflict && <span className="pill conflict">CONFLICT</span>}
         </div>
       </div>
       <p>{p.summary}</p>
       {p.mechanism && <p className="mech"><em>Mechanism.</em> {p.mechanism}</p>}
       {p.dose_condition && <p className="dose">{p.dose_condition}</p>}
       {p.patient_specific_note && <p className="pt">For this patient: {p.patient_specific_note}</p>}
-      {p.evidence_conflict && <p className="conflict">Conflicting evidence: {p.evidence_conflict}</p>}
+      {p.evidence_conflict && (
+        <p className="conflict" role="status">
+          <strong>Conflicting evidence.</strong> {p.evidence_conflict}
+        </p>
+      )}
       {p.severe_if.length > 0 && (
         <div className="severe">
           <strong>More severe if</strong>

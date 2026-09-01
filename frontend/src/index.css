@@ -205,6 +205,7 @@ a:hover { color: var(--copper); }
 .pill.insuff { background: #6b4f1d; }
 .pill.timing { background: var(--timing); }
 .pill.contra { background: var(--contra); }
+.pill.conflict { background: var(--grade-b); }
 
 .grade-row p { margin: 0; font-size: 13.5px; color: var(--muted); }
 .grade-row p b { color: var(--ink); font-weight: 600; }
@@ -501,6 +502,7 @@ a:hover { color: var(--copper); }
 .pair.contraindicated { background: #fdecea; border-color: #e8b4a8; }
 .pair.timing { background: #eef4fb; border-color: #b9cce4; }
 .pair.insufficient { background: #f6f0e0; border-color: #d4c08a; }
+.pair.has-conflict { border-color: var(--grade-b); }
 
 .insuff-section { margin: 18px 0 8px; }
 .insuff-intro {
@@ -533,7 +535,14 @@ a:hover { color: var(--copper); }
 .pair .mech, .pair .note { font-size: 13.5px; color: var(--muted); }
 .pair .dose { font-size: 13.5px; color: var(--warn); }
 .pair .pt { font-size: 13.5px; color: #5b21b6; }
-.pair .conflict { font-size: 13.5px; color: var(--grade-b); }
+.pair .conflict {
+  font-size: 13.5px;
+  color: #78350f;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
 
 .severe { margin: 8px 0 0; font-size: 13.5px; }
 .severe ul { margin: 4px 0 0; padding-left: 18px; }

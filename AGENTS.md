@@ -183,15 +183,17 @@ Per unresolved pair, stop at the first tier that returns records:
 | Step | Tool | Grade if interaction |
 |---|---|---|
 | 1 | `openfda_label_check` | A |
-| 2 | PubMed eutils + ClinicalTrials.gov (RCT / PK / meta / systematic review) | B |
-| 3 | leftover PubMed + Firecrawl case-report search | C |
+| 2 | PubMed eutils + ClinicalTrials.gov (RCT / **human PK** / meta / systematic review) | B |
+| 3 | leftover case reports + Firecrawl **fetched** pages | C |
 | 4 | nothing | no DDI (`grade=null`, `category=none`) |
 
 Hard rules (also in the synthesizer prompt):
 
 - Cite **only** records the tools just retrieved. No record → no citation → no graded claim.
 - `verdict` is `interaction` | `none` | `insufficient`. Only `interaction` gets a grade.
-- Conflict (case report vs absent/negative trial) → Grade C + `evidence_conflict`.
+- Human PK / coadministration studies are Grade B when they are the strongest retrieved human evidence (not only RCT-tagged papers).
+- Conflict (case report vs absent/negative trial) → Grade C + `evidence_conflict` (never upgraded to B).
+- Grade C may `web_fetch` a search URL; unfetched pages are not citations.
 - Unknown dose → conditional `dose_condition` (`DDI possible if … > X mg`).
 - Separable admin (e.g. cations + levothyroxine) → `category=timing`.
 - Contraindicated → `category=contraindicated` (also copied into the banner).
@@ -344,6 +346,9 @@ shared JSON parse, NormalizedDrug pre-filter shape, settings keys into LiteLLM.
 
 `backend/tests/test_waterfall_citations.py` — empty or unmapped synthesizer
 citations never earn a grade; invented PMIDs never appear.
+
+`backend/tests/test_waterfall_grades.py` — human PK grades B; case report vs
+negative trial is C with `evidence_conflict`; unfetched URLs are not citations.
 
 `backend/tests/test_overlay.py` — local Grade A pairs get timing / missing-dose
 copy / patient notes without a synthesizer call; extract dose and schedule
