@@ -56,7 +56,7 @@ async def test_check_does_not_send_raw_patient_notes(monkeypatch):
         return drugs, []
 
     async def fake_prefilter(_items):
-        return [], []
+        return [], [("warfarin", "amiodarone")]
 
     async def fake_waterfall(_pairs, patient_ctx=None):
         waterfall_seen.append(patient_ctx)
@@ -99,7 +99,7 @@ async def test_check_waterfall_never_gets_raw_request_fallback(monkeypatch):
         ) for n in names], [])
 
     async def fake_prefilter(_items):
-        return [], []
+        return [], [("warfarin", "amiodarone")]
 
     seen: list[str | None] = []
 

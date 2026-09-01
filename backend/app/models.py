@@ -46,6 +46,8 @@ class NormalizedDrug(BaseModel):
     components: list[str] = Field(default_factory=list)  # >1 for FDCs/combos
     component_rxcuis: dict[str, str] = Field(default_factory=dict)
     resolved_via: str | None = None  # "indian_dataset" | "rxnav" | "agent_web" | None
+    dose: str | None = None          # from extract, e.g. "5 mg"
+    schedule: str | None = None      # from extract, e.g. "1-0-1" / "BD"
 
     def rxcui_for(self, component: str) -> str | None:
         """RxCUI for one ingredient. Never reuse a sibling FDC component's id."""

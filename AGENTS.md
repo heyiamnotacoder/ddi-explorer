@@ -50,7 +50,8 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │   │   ├── ocr.py
 │   │   │   ├── scrubber.py
 │   │   │   ├── normalize.py
-│   │   │   └── prefilter.py
+│   │   │   ├── prefilter.py
+│   │   │   └── overlay.py    Grade A timing/dose/patient copy, no LLM
 │   │   └── agent/            LLM + evidence tools
 │   │       ├── llm.py        litellm adapter
 │   │       ├── extract.py    first LLM call (drugs from scrubbed text)
@@ -143,6 +144,8 @@ Never pass raw `req.patient_context` into a reasoning call.
 One JSON completion. Input is already de-identified. Returns
 `{drugs: [{name, dose, timing}], non_drugs, patient_context}`.
 Keep strength on the name (`Telma 40`, `Dolo 650`) — brand resolution needs it.
+Dose and 1-0-1-style `timing` are copied onto `NormalizedDrug.dose` /
+`NormalizedDrug.schedule` so they survive to the check response.
 
 ### 4. Normalize — `pipeline/normalize.py`
 
@@ -167,6 +170,11 @@ copied to `rxcui` for display. A sibling's identifier is never reused.
 RxNav interaction list for pairs that have two distinct **component** RxCUIs.
 Hits become Grade A, `source_tier="local"`, and never enter the waterfall.
 Match on RxCUI so Indian spellings (`amoxycillin`) still hit.
+
+A deterministic overlay (`pipeline/overlay.py`) then fills `category=timing`
+(separable admin), `dose_condition` (missing dose on a dose-dependent pair),
+and `patient_specific_note` / `severe_if` from extracted dose/schedule plus
+**scrubbed** patient notes. No synthesizer call.
 
 ### 6. Waterfall — `agent/waterfall.py`
 
@@ -244,6 +252,8 @@ Defined in `backend/app/main.py` and `models.py`.
 
 `CheckRequest`: `{ text?, images[]?, patient_context?, timing? }`
 (`images` are data-URLs).
+
+`NormalizedDrug` also carries `dose` and `schedule` when extract found them.
 
 `CheckResponse`: `scrubbed_text`, `normalized_drugs`, `unresolved_drugs`,
 `pairs`, `contraindicated_banner`, `avoid_with_medications`,
@@ -335,8 +345,12 @@ shared JSON parse, NormalizedDrug pre-filter shape, settings keys into LiteLLM.
 `backend/tests/test_waterfall_citations.py` — empty or unmapped synthesizer
 citations never earn a grade; invented PMIDs never appear.
 
-When changing scrub, normalize, ranking, or LLM wiring, extend these tests.
-Do not add tests that need live API keys. The ~30-pair **full live
+`backend/tests/test_overlay.py` — local Grade A pairs get timing / missing-dose
+copy / patient notes without a synthesizer call; extract dose and schedule
+survive on `NormalizedDrug`.
+
+When changing scrub, normalize, ranking, overlay, or LLM wiring, extend these
+tests. Do not add tests that need live API keys. The ~30-pair **full live
 `/api/check` eval lives on a branch off main** (not default pytest).
 
 Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may

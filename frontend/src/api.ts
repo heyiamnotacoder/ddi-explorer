@@ -27,6 +27,8 @@ export interface NormalizedDrug {
   components: string[];
   component_rxcuis?: Record<string, string>;
   resolved_via?: string | null;
+  dose?: string | null;
+  schedule?: string | null;
 }
 
 export interface CheckResponse {

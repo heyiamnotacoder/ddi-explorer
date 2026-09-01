@@ -22,7 +22,7 @@ Locked review decisions (below) are current product rules, not backlog guesses.
 | Users/scope | Clinician-facing decision support (disclaimers, auditability, citation-required grading) |
 | Evidence retrieval | **Waterfall with early exit** (see §4). Tools are REST wrappers in `agent/tools.py` (openFDA, PubMed eutils, ClinicalTrials.gov v2, Firecrawl). MCP servers are optional, not required |
 | Persistence | Stateless backend. Browser history is **not shipped**; when added, **scrubbed snapshots only** (never raw patient/timing text) |
-| Grade A patient/dose/timing | Deterministic overlay on the known pair — no extra LLM (follow-up work) |
+| Grade A patient/dose/timing | Deterministic overlay on the known pair — no extra LLM. Extracted dose/schedule stay on `NormalizedDrug` |
 | Avoid-with | openFDA label-backed lookup (follow-up work; v1 stub lists non-drugs only) |
 | Eval | ~30 **full live `/api/check`** cases on a **branch off main**, not default pytest. Offline unit tests stay on `main` and must not need live API keys |
 
@@ -52,6 +52,8 @@ FastAPI — PRE-AGENT PIPELINE (deterministic, no LLM)
   5. Local known-DDI pre-filter (RxNav interaction API):
        same NormalizedDrug shape as a fresh check; match on component RxCUI
        resolves known pairs instantly → Grade A, zero LLM tokens
+       then a deterministic overlay (timing / dose_condition / patient note)
+       from scrubbed extract fields — still no synthesizer
   ▼
 SINGLE AGENT (default Claude; swap via LLM_MODEL) — unknown pairs only
   Tools (REST, not MCP):
@@ -149,7 +151,9 @@ For each unresolved pair (Drug A, Drug B):
 ```
 POST /api/check
   body: { text?, images[]?, patient_context?, timing? }
-  → { scrubbed_text, normalized_drugs, unresolved_drugs,
+  → { scrubbed_text,
+      normalized_drugs: [{input_name, components, dose?, schedule?, ...}],
+      unresolved_drugs,
       pairs: [{drugs, grade, severity, summary, citations[],
                category: "interaction"|"timing"|"contraindicated"|"none",
                severe_if[]?, patient_specific_note?, dose_condition?}],

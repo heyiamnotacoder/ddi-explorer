@@ -401,6 +401,7 @@ a:hover { color: var(--copper); }
 
 .chip .from { font-size: 12px; color: var(--muted); }
 .chip .to { font-size: 14px; font-weight: 600; text-transform: capitalize; }
+.chip .dose-sched { font-size: 12px; color: var(--ink); }
 .chip .via { font-size: 11px; color: var(--brass); }
 
 .fdc-note {

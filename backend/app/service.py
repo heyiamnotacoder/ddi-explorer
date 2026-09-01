@@ -25,7 +25,7 @@ from .models import (
     ReplaceableDrug,
 )
 from .pipeline import normalize as norm
-from .pipeline import ocr, prefilter, scrubber
+from .pipeline import ocr, overlay, prefilter, scrubber
 
 DISCLAIMER = (
     "DDI Explorer is a clinical decision-support aid for healthcare "
@@ -60,6 +60,31 @@ def _patient_ctx_for_llm(extracted: dict, scrubbed_blob: str) -> str | None:
     raw = extracted.get("patient_context") or _labeled_section(
         scrubbed_blob, "Patient context:")
     return scrubber.for_reasoning_llm(raw)
+
+
+def _opt_str(value: object) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    s = str(value).strip()
+    if not s or s.lower() in {"null", "none", "n/a", "-", "undefined"}:
+        return None
+    return s
+
+
+def _attach_extract_fields(
+    normalized: list[NormalizedDrug],
+    extracted_drugs: list[dict],
+) -> list[NormalizedDrug]:
+    """Copy extract dose/schedule onto the matching input in order."""
+    out: list[NormalizedDrug] = []
+    for i, n in enumerate(normalized):
+        src = extracted_drugs[i] if i < len(extracted_drugs) else {}
+        dose = _opt_str(src.get("dose"))
+        schedule = _opt_str(src.get("timing"))
+        if dose or schedule:
+            n = n.model_copy(update={"dose": dose, "schedule": schedule})
+        out.append(n)
+    return out
 
 
 def _dedupe_pairs(pairs: list[PairResult]) -> list[PairResult]:
@@ -99,19 +124,28 @@ async def run_check(req: CheckRequest) -> CheckResponse:
 
     # 3) Structured extraction (first LLM contact; input is clean)
     extracted = await extract.extract_drugs(scrubbed.text)
-    drug_names = [d["name"] for d in extracted["drugs"] if d.get("name")]
+    extracted_drugs = [d for d in extracted["drugs"] if d.get("name")]
     patient_ctx = _patient_ctx_for_llm(extracted, scrubbed.text)
 
     # 4) Normalize (local Indian dataset -> RxNav -> unresolved)
-    normalized, unresolved = await norm.normalize_drugs(drug_names)
+    normalized, unresolved = await norm.normalize_drugs(
+        [d["name"] for d in extracted_drugs]
+    )
+    normalized = _attach_extract_fields(normalized, extracted_drugs)
 
     # 5) Local pre-filter: known pairs resolved without LLM tokens
     known_results, unknown_pairs = await prefilter.check_known_pairs(
         [n for n in normalized if n.components]
     )
+    known_results = overlay.apply(
+        known_results, drugs=normalized, patient_ctx=patient_ctx,
+    )
 
-    # 6) Agent waterfall for unknown pairs only
-    agent_results = await waterfall.evaluate_pairs(unknown_pairs, patient_ctx)
+    # 6) Agent waterfall for unknown pairs only (local pairs never enter)
+    agent_results = (
+        await waterfall.evaluate_pairs(unknown_pairs, patient_ctx)
+        if unknown_pairs else []
+    )
 
     # 7) Assemble (dedupe in case RxNav names and waterfall names collide)
     all_pairs = _dedupe_pairs(known_results + agent_results)
@@ -160,6 +194,9 @@ async def _recheck_against_rest(
     alt = normalized[0]
     new_keys = {c.lower() for c in alt.components}
     known, unknown = await prefilter.check_known_pairs(remaining + [alt])
+    known = overlay.apply(
+        known, drugs=remaining + [alt], patient_ctx=patient_ctx,
+    )
     known = _pairs_involving(known, new_keys)
     unknown = [
         (a, b) for a, b in unknown

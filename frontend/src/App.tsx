@@ -463,6 +463,11 @@ export default function App() {
                   <span className="to">
                     {d.components.length ? d.components.join(" + ") : (d.generic_name || "unresolved")}
                   </span>
+                  {(d.dose || d.schedule) && (
+                    <span className="dose-sched">
+                      {[d.dose, d.schedule].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
                   <span className="via">{d.resolved_via ? (VIA[d.resolved_via] || d.resolved_via) : "not in index"}</span>
                 </div>
               ))}
