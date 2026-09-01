@@ -20,6 +20,7 @@ from .models import (
     CheckRequest,
     CheckResponse,
     Grade,
+    NormalizedDrug,
     PairResult,
     ReplaceableDrug,
 )
@@ -105,11 +106,9 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     normalized, unresolved = await norm.normalize_drugs(drug_names)
 
     # 5) Local pre-filter: known pairs resolved without LLM tokens
-    prefilter_input = [
-        {"generic": n.generic_name, "rxcui": n.rxcui, "components": n.components}
-        for n in normalized if n.components
-    ]
-    known_results, unknown_pairs = await prefilter.check_known_pairs(prefilter_input)
+    known_results, unknown_pairs = await prefilter.check_known_pairs(
+        [n for n in normalized if n.components]
+    )
 
     # 6) Agent waterfall for unknown pairs only
     agent_results = await waterfall.evaluate_pairs(unknown_pairs, patient_ctx)
@@ -151,7 +150,7 @@ def _pairs_involving(pairs: list[PairResult], names: set[str]) -> list[PairResul
 
 async def _recheck_against_rest(
     alt_name: str,
-    remaining: list[dict],
+    remaining: list[NormalizedDrug],
     patient_ctx: str | None,
 ) -> tuple[list[PairResult], list[str], str | None]:
     """Normalize one substitute and grade it only vs leftover components."""
@@ -160,12 +159,7 @@ async def _recheck_against_rest(
         return [], [], (unresolved[0] if unresolved else alt_name)
     alt = normalized[0]
     new_keys = {c.lower() for c in alt.components}
-    known, unknown = await prefilter.check_known_pairs(
-        remaining + [{
-            "generic": alt.generic_name, "rxcui": alt.rxcui,
-            "components": alt.components,
-        }]
-    )
+    known, unknown = await prefilter.check_known_pairs(remaining + [alt])
     known = _pairs_involving(known, new_keys)
     unknown = [
         (a, b) for a, b in unknown
@@ -211,10 +205,7 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
         change_rows = filtered
 
     suggestions: list[AlternativeSuggestion] = []
-    remaining_base = [
-        {"generic": d.generic_name, "rxcui": d.rxcui, "components": d.components}
-        for d in req.normalized_drugs if d.components
-    ]
+    remaining_base = [d for d in req.normalized_drugs if d.components]
 
     for row in change_rows:
         src = str(row.get("from") or "").strip()
@@ -223,11 +214,11 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
         src_l = src.lower()
         product = alts._parent_product(req.normalized_drugs, src)
         old_pairs = _pairs_involving(req.pairs, {src_l})
-        remaining = []
+        remaining: list[NormalizedDrug] = []
         for item in remaining_base:
-            comps = [c for c in item["components"] if c.lower() != src_l]
+            comps = [c for c in item.components if c.lower() != src_l]
             if comps:
-                remaining.append({**item, "components": comps})
+                remaining.append(item.model_copy(update={"components": comps}))
 
         for alt in (row.get("alternatives") or [])[:2]:
             name = str(alt.get("name") or "").strip()

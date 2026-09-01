@@ -8,7 +8,7 @@ from __future__ import annotations
 import httpx
 
 from ..config import get_settings
-from ..models import Category, Citation, Grade, PairResult
+from ..models import Category, Citation, Grade, NormalizedDrug, PairResult
 
 RXNAV_INTERACTION = "https://rxnav.nlm.nih.gov/REST/interaction/list.json"
 
@@ -26,10 +26,11 @@ def _is_contraindicated(desc: str) -> bool:
     return "contraindicat" in desc.lower()
 
 
-async def check_known_pairs(drugs: list[dict]) -> tuple[list[PairResult], list[tuple[str, str]]]:
-    """drugs: [{'generic': str, 'rxcui': str|None, 'components': [str]}]
+async def check_known_pairs(
+    drugs: list[NormalizedDrug],
+) -> tuple[list[PairResult], list[tuple[str, str]]]:
+    """Returns (resolved_pair_results, unresolved_component_pairs).
 
-    Returns (resolved_pair_results, unresolved_component_pairs).
     Only pairs where BOTH sides have RxCUIs can be checked via RxNav;
     everything else flows to the agent waterfall.
     """
@@ -39,10 +40,10 @@ async def check_known_pairs(drugs: list[dict]) -> tuple[list[PairResult], list[t
     pairs: list[tuple[str, str, str | None, str | None]] = []
     for i in range(len(drugs)):
         for j in range(i + 1, len(drugs)):
-            for ca in drugs[i]["components"]:
-                for cb in drugs[j]["components"]:
+            for ca in drugs[i].components:
+                for cb in drugs[j].components:
                     if ca != cb:
-                        pairs.append((ca, cb, drugs[i].get("rxcui"), drugs[j].get("rxcui")))
+                        pairs.append((ca, cb, drugs[i].rxcui, drugs[j].rxcui))
 
     cui_pairs = [p for p in pairs if p[2] and p[3] and p[2] != p[3]]
     no_cui_pairs = {(a, b) for a, b, ra, rb in pairs if not (ra and rb) or ra == rb}

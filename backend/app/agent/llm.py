@@ -5,12 +5,28 @@ Vision model is a SEPARATE setting — DeepSeek is text-only.
 """
 from __future__ import annotations
 
+import json
+
 import litellm
 
 from ..config import get_settings
 from ..pipeline import scrubber
 
 litellm.drop_params = True  # tolerate provider-specific param mismatches
+
+
+def parse_json_object(text: str | None) -> dict:
+    """First JSON object in model output, or {}."""
+    if not text:
+        return {}
+    try:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end < start:
+            return {}
+        data = json.loads(text[start:end + 1])
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _gate_reasoning_messages(messages: list[dict]) -> list[dict]:

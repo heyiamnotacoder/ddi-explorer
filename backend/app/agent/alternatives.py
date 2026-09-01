@@ -352,14 +352,6 @@ def leftover_ddis(pairs: list[PairResult]) -> list[PairResult]:
     ]
 
 
-def _parse_json(text: str) -> dict:
-    try:
-        start, end = text.find("{"), text.rfind("}")
-        return json.loads(text[start:end + 1]) if start != -1 else {}
-    except json.JSONDecodeError:
-        return {}
-
-
 def _payload(drugs: list[NormalizedDrug], pairs: list[PairResult],
              candidates: list[Candidate], patient_context: str | None,
              avoid: list[str], scrubbed_text: str | None = None) -> str:
@@ -407,7 +399,7 @@ async def propose(drugs: list[NormalizedDrug], pairs: list[PairResult],
         response_format={"type": "json_object"},
         max_tokens=2500,
     )
-    return _parse_json(raw)
+    return llm.parse_json_object(raw)
 
 
 def allowed_from_names(candidates: list[Candidate]) -> set[str]:

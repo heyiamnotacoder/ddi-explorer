@@ -46,14 +46,6 @@ verdict="insufficient": records retrieved but they do not answer the question.
 Only verdict="interaction" earns a grade."""
 
 
-def _parse_json(text: str) -> dict:
-    try:
-        start, end = text.find("{"), text.rfind("}")
-        return json.loads(text[start:end + 1]) if start != -1 else {}
-    except json.JSONDecodeError:
-        return {}
-
-
 def _citations_from(cited: list, pool: list[dict], source: str) -> list[Citation]:
     """Map LLM-cited identifiers back to REAL retrieved records only."""
     out = []
@@ -82,7 +74,7 @@ async def _synthesize(drug_a: str, drug_b: str, tier_label: str,
     raw = await llm.complete(
         [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
         response_format={"type": "json_object"})
-    return _parse_json(raw)
+    return llm.parse_json_object(raw)
 
 
 def _verdict_result(a: str, b: str, s: dict, grade: Grade | None,

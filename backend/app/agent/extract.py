@@ -5,8 +5,6 @@ so this is safe to send to the reasoning model.
 """
 from __future__ import annotations
 
-import json
-
 from . import llm
 
 PROMPT = """Extract structured data from this (de-identified) prescription / medication text.
@@ -34,11 +32,7 @@ async def extract_drugs(scrubbed_text: str) -> dict:
     raw = await llm.complete(
         [{"role": "user", "content": PROMPT + scrubbed_text}],
         response_format={"type": "json_object"}, max_tokens=1500)
-    try:
-        start, end = raw.find("{"), raw.rfind("}")
-        data = json.loads(raw[start:end + 1])
-    except (json.JSONDecodeError, ValueError):
-        data = {}
+    data = llm.parse_json_object(raw)
     data.setdefault("drugs", [])
     data.setdefault("non_drugs", [])
     data.setdefault("patient_context", None)
