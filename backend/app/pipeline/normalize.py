@@ -10,6 +10,7 @@ component pair gets checked downstream.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from functools import lru_cache
@@ -40,6 +41,24 @@ _OTHER_FORMS = (
     "gel", "cream", "ointment", "solution", "liquid",
     "inhaler", "spray", "lotion", "patch",
 )
+
+# Strength with a unit, e.g. "20mg" / "5 mg". Brand numbers without a unit
+# ("dolo 650", "telma 40") are left intact — the Indian index keys need them.
+_STRENGTH_RE = re.compile(
+    r"\b\d+(\.\d+)?\s*(mg|mcg|ug|µg|g|gm|ml|iu|i\.u\.?|%)\b",
+    re.I,
+)
+_COMBO_RE = re.compile(r"\s*/\s*|\s+\+\s+")
+
+
+def _bare_name(name: str) -> str:
+    s = name.lower().strip()
+    s = _STRENGTH_RE.sub(" ", s)
+    return re.sub(r"\s+", " ", s).strip(" ,;/-")
+
+
+def _is_combo_name(s: str) -> bool:
+    return bool(_COMBO_RE.search(s or ""))
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +101,37 @@ def _known_generics() -> frozenset[str]:
     return frozenset(out)
 
 
+def _generic_hit(token: str, generics: frozenset[str]) -> str | None:
+    if not token:
+        return None
+    if token in generics:
+        return token
+    gmatch = process.extractOne(token, generics, scorer=fuzz.WRatio)
+    if gmatch and gmatch[1] >= GENERIC_FUZZY_THRESHOLD:
+        return gmatch[0]
+    return None
+
+
+def _brand_fuzzy(key: str, index: dict[str, list[str]]) -> list[str] | None:
+    matches = process.extract(key, index.keys(), scorer=fuzz.WRatio, limit=15)
+    matches = [m for m in matches if m[1] >= FUZZY_THRESHOLD]
+    if not matches:
+        return None
+    singles = [m for m in matches if len(index[m[0]]) == 1]
+    pool = singles or matches
+    best = min(pool, key=lambda m: (len(index[m[0]]), -m[1], _form_penalty(m[0], key)))
+    return index[best[0]]
+
+
 def _lookup_indian(name: str) -> list[str] | None:
     """Brand -> composition(s). Exact, word-bounded prefix, known generic,
     then fuzzy. A plain generic must not resolve to an FDC; a bare brand
-    prefers the oral solid over drops/syrup."""
+    prefers the oral solid over drops/syrup.
+
+    Strength-with-unit ('amlodipine 20mg') is stripped before generic/fuzzy
+    so a dose does not match an FDC partner's mg or kill RxNav later.
+    Unitless brand numbers ('dolo 650') stay on the full string.
+    """
     index = _indian_index()
     if not index:
         return None
@@ -98,20 +144,19 @@ def _lookup_indian(name: str) -> list[str] | None:
     prefix_hits = [k for k in index if k.startswith(key + " ") or k.startswith(key + "-")]
     if prefix_hits:
         return index[_pick_brand(prefix_hits, index, key)]
-    # typed name is already a generic (e.g. 'amlodipine') — do not fuzzy an FDC
+    # typed name is already a generic (e.g. 'amlodipine') — do not fuzzy an FDC.
+    # Also try the dose-stripped form so 'amlodipine 20mg' stays a singleton.
     generics = _known_generics()
-    if key in generics:
-        return [key]
-    gmatch = process.extractOne(key, generics, scorer=fuzz.WRatio)
-    if gmatch and gmatch[1] >= GENERIC_FUZZY_THRESHOLD:
-        return [gmatch[0]]
-    matches = process.extract(key, index.keys(), scorer=fuzz.WRatio, limit=15)
-    matches = [m for m in matches if m[1] >= FUZZY_THRESHOLD]
-    if matches:
-        singles = [m for m in matches if len(index[m[0]]) == 1]
-        pool = singles or matches
-        best = min(pool, key=lambda m: (len(index[m[0]]), -m[1], _form_penalty(m[0], key)))
-        return index[best[0]]
+    bare = _bare_name(key)
+    for token in (key, bare):
+        hit = _generic_hit(token, generics)
+        if hit:
+            return [hit]
+    brand = _brand_fuzzy(key, index)
+    if brand:
+        return brand
+    if bare != key:
+        return _brand_fuzzy(bare, index)
     return None
 
 
@@ -125,19 +170,77 @@ async def _rxnav_get(client: httpx.AsyncClient, path: str, **params) -> dict:
     return r.json()
 
 
+async def _rxnorm_name(client: httpx.AsyncClient, rxcui: str) -> str | None:
+    props = await _rxnav_get(client, f"/rxcui/{rxcui}/property.json", propName="RxNorm Name")
+    concepts = props.get("propConceptGroup", {}).get("propConcept") or []
+    if not concepts:
+        return None
+    value = concepts[0].get("propValue")
+    return value or None
+
+
+def _pick_rxnav_candidate(
+    query: str, rows: list[tuple[str, str, float]],
+) -> tuple[str, str] | None:
+    """Prefer a named non-combo ingredient when the query is a single drug.
+
+    `rows` are (rxcui, rxnorm_name, score). Nameless hits are skipped — some
+    approximateTerm RxCUIs have no RxNorm Name and used to fail the whole
+    resolve (e.g. 'warfar 100 mg').
+    """
+    named = [(cui, n, s) for cui, n, s in rows if cui and n]
+    if not named:
+        return None
+    if not _is_combo_name(query):
+        singles = [r for r in named if not _is_combo_name(r[1])]
+        pool = singles or named
+    else:
+        pool = named
+    best = max(pool, key=lambda r: (r[2], -len(r[1])))
+    return best[0], best[1]
+
+
 async def _rxnav_resolve(client: httpx.AsyncClient, name: str) -> tuple[str | None, str | None]:
-    """name -> (rxcui, generic_name) using approximate matching (handles typos)."""
+    """name -> (rxcui, generic_name) using approximate matching (handles typos).
+
+    Dose-stripped form is tried first so 'amlodipine 20mg' is not matched to
+    a 20 mg combo partner. Several candidates are scored; combos lose unless
+    the query itself looks like a combination.
+    """
+    terms: list[str] = []
+    for t in (_bare_name(name), name.strip()):
+        if t and t.lower() not in {x.lower() for x in terms}:
+            terms.append(t)
     try:
-        approx = await _rxnav_get(client, "/approximateTerm.json", term=name, maxEntries=1)
-        candidates = approx.get("approximateGroup", {}).get("candidate", [])
-        if not candidates:
-            return None, None
-        rxcui = candidates[0].get("rxcui")
-        if not rxcui:
-            return None, None
-        props = await _rxnav_get(client, f"/rxcui/{rxcui}/property.json", propName="RxNorm Name")
-        generic = props.get("propConceptGroup", {}).get("propConcept", [{}])[0].get("propValue")
-        return rxcui, generic
+        for term in terms:
+            approx = await _rxnav_get(
+                client, "/approximateTerm.json", term=term, maxEntries=5)
+            raw = approx.get("approximateGroup", {}).get("candidate") or []
+            ordered: list[tuple[str, float]] = []
+            seen: set[str] = set()
+            for c in raw:
+                rxcui = c.get("rxcui")
+                if not rxcui or rxcui in seen:
+                    continue
+                seen.add(rxcui)
+                try:
+                    score = float(c.get("score") or 0)
+                except (TypeError, ValueError):
+                    score = 0.0
+                ordered.append((rxcui, score))
+            names = await asyncio.gather(
+                *[_rxnorm_name(client, cui) for cui, _ in ordered],
+                return_exceptions=True,
+            )
+            rows: list[tuple[str, str, float]] = []
+            for (rxcui, score), generic in zip(ordered, names):
+                if isinstance(generic, Exception):
+                    generic = None
+                rows.append((rxcui, generic or "", score))
+            picked = _pick_rxnav_candidate(term, rows)
+            if picked:
+                return picked
+        return None, None
     except (httpx.HTTPError, KeyError, IndexError):
         return None, None
 
@@ -155,7 +258,7 @@ def split_components(generic_string: str) -> list[str]:
     seen: set[str] = set()
     for p in parts:
         p = re.sub(r"\b\d+(\.\d+)?\s*(mg|mcg|ug|µg|g|gm|ml|iu|i\.u\.?|%)\b", " ", p)
-        p = re.sub(r"\b(tablet|tablets|capsule|capsules|injection|syrup|cream|ointment|drops?|solution|suspension)\b", " ", p)
+        p = re.sub(r"\b(tablet|tablets|capsule|capsules|injection|syrup|cream|ointment|drops?|solution|suspension|oral)\b", " ", p)
         p = re.sub(r"\s+", " ", p).strip("() -.")
         if not p or p in _JUNK or len(p) < 3:
             continue

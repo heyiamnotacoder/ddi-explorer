@@ -1,5 +1,10 @@
 """Normalization tests — offline parts only (no network)."""
-from app.pipeline.normalize import _lookup_indian, split_components
+from app.pipeline.normalize import (
+    _bare_name,
+    _lookup_indian,
+    _pick_rxnav_candidate,
+    split_components,
+)
 
 
 def test_indian_brand_exact():
@@ -71,3 +76,59 @@ def test_five_plain_names_make_five_singleton_components():
         flats.append(flat[0])
     assert "ml" not in flats
     assert "atenolol" not in flats
+
+
+def test_bare_name_strips_strength_keeps_brand_numbers():
+    assert _bare_name("amilodipine 20mg") == "amilodipine"
+    assert _bare_name("levoceterizine 5 mg") == "levoceterizine"
+    assert _bare_name("warfar 100 mg") == "warfar"
+    assert _bare_name("omeprazole 5 mg") == "omeprazole"
+    # Indian brands often encode strength without a unit
+    assert _bare_name("dolo 650") == "dolo 650"
+    assert _bare_name("telma 40") == "telma 40"
+
+
+def test_screenshot_typos_with_doses_are_single_generics():
+    """Typed 'amilodipine 20mg, levoceterizine 5 mg, warfar 100 mg, omeprazole 5 mg'.
+
+    Strength on the name must not: (a) turn amlodipine into an FDC, or
+    (b) leave warfarin unresolved. Brand names with a number (dolo 650)
+    still resolve via the full string.
+    """
+    cases = {
+        "amilodipine 20mg": ["amlodipine"],
+        "amlodipine 20mg": ["amlodipine"],
+        "levoceterizine 5 mg": ["levocetirizine"],
+        "warfar 100 mg": ["warfarin"],
+        "omeprazole 5 mg": ["omeprazole"],
+        "dolo 650": None,  # filled below — must stay paracetamol, not a generic miss
+    }
+    for raw, expected in cases.items():
+        comps = _lookup_indian(raw)
+        assert comps, raw
+        flat = [c for comp in comps for c in split_components(comp)]
+        if expected is None:
+            assert "paracetamol" in " ".join(flat)
+            assert len(flat) == 1
+        else:
+            assert flat == expected, (raw, flat)
+
+
+def test_rxnav_picker_skips_combo_when_query_is_a_single_drug():
+    rows = [
+        ("898356", "amlodipine 5 MG / benazepril hydrochloride 20 MG Oral Capsule", 7.3),
+        ("17767", "amlodipine", 7.1),
+    ]
+    rxcui, name = _pick_rxnav_candidate("amilodipine 20mg", rows)
+    assert rxcui == "17767"
+    assert name == "amlodipine"
+
+
+def test_rxnav_picker_skips_nameless_hits():
+    rows = [
+        ("241757", "", 6.0),
+        ("11289", "warfarin", 5.9),
+    ]
+    rxcui, name = _pick_rxnav_candidate("warfar 100 mg", rows)
+    assert rxcui == "11289"
+    assert name == "warfarin"
