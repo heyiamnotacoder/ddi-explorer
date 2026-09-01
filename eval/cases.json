@@ -1,0 +1,276 @@
+{
+  "version": 1,
+  "notes": "Full live POST /api/check cases. No PHI. No API keys. Not default pytest.",
+  "cases": [
+    {
+      "id": "warfarin-aspirin",
+      "text": "warfarin 5 mg once daily, aspirin 75 mg once daily",
+      "expect": {
+        "min_normalized": 2,
+        "generics_include": ["warfarin", "aspirin"],
+        "pair": ["warfarin", "aspirin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "maoi-ssri",
+      "text": "phenelzine 15 mg, fluoxetine 20 mg",
+      "expect": {
+        "min_normalized": 2,
+        "generics_include": ["phenelzine", "fluoxetine"],
+        "pair": ["phenelzine", "fluoxetine"],
+        "banner": true
+      }
+    },
+    {
+      "id": "screenshot-quartet",
+      "text": "amilodipine 20mg, levoceterizine 5 mg, warfar 100 mg, omeprazole 5 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "components_singleton": true,
+        "generics_include": ["amlodipine", "levocetirizine", "warfarin", "omeprazole"],
+        "pair": ["warfarin", "omeprazole"]
+      }
+    },
+    {
+      "id": "warfarin-amiodarone",
+      "text": "warfarin 5 mg, amiodarone 200 mg",
+      "expect": {
+        "generics_include": ["warfarin", "amiodarone"],
+        "pair": ["warfarin", "amiodarone"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "warfarin-omeprazole",
+      "text": "warfarin 5 mg, omeprazole 20 mg",
+      "expect": {
+        "generics_include": ["warfarin", "omeprazole"],
+        "pair": ["warfarin", "omeprazole"]
+      }
+    },
+    {
+      "id": "simvastatin-amlodipine",
+      "text": "simvastatin, amlodipine 5 mg",
+      "expect": {
+        "generics_include": ["simvastatin", "amlodipine"],
+        "pair": ["simvastatin", "amlodipine"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "levothyroxine-calcium",
+      "text": "levothyroxine 50 mcg morning, calcium carbonate 500 mg",
+      "expect": {
+        "generics_include": ["levothyroxine", "calcium"],
+        "pair": ["levothyroxine", "calcium"],
+        "category": "timing"
+      }
+    },
+    {
+      "id": "sildenafil-isosorbide",
+      "text": "sildenafil 50 mg, isosorbide mononitrate 30 mg",
+      "expect": {
+        "generics_include": ["sildenafil", "isosorbide"],
+        "pair": ["sildenafil", "isosorbide"],
+        "banner": true
+      }
+    },
+    {
+      "id": "clarithromycin-simvastatin",
+      "text": "clarithromycin 500 mg, simvastatin 40 mg",
+      "expect": {
+        "generics_include": ["clarithromycin", "simvastatin"],
+        "pair": ["clarithromycin", "simvastatin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "methotrexate-trimethoprim",
+      "text": "methotrexate 15 mg weekly, trimethoprim 200 mg",
+      "expect": {
+        "generics_include": ["methotrexate", "trimethoprim"],
+        "pair": ["methotrexate", "trimethoprim"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "lithium-ibuprofen",
+      "text": "lithium carbonate 300 mg, ibuprofen 400 mg",
+      "expect": {
+        "generics_include": ["lithium", "ibuprofen"],
+        "pair": ["lithium", "ibuprofen"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "digoxin-amiodarone",
+      "text": "digoxin 0.125 mg, amiodarone 200 mg",
+      "expect": {
+        "generics_include": ["digoxin", "amiodarone"],
+        "pair": ["digoxin", "amiodarone"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "rifampicin-warfarin",
+      "text": "rifampicin 600 mg, warfarin 5 mg",
+      "expect": {
+        "generics_include": ["rifampicin", "warfarin"],
+        "pair": ["rifampicin", "warfarin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "allopurinol-azathioprine",
+      "text": "allopurinol 100 mg, azathioprine 50 mg",
+      "expect": {
+        "generics_include": ["allopurinol", "azathioprine"],
+        "pair": ["allopurinol", "azathioprine"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "spironolactone-potassium",
+      "text": "spironolactone 25 mg, potassium chloride 600 mg",
+      "expect": {
+        "generics_include": ["spironolactone", "potassium"],
+        "pair": ["spironolactone", "potassium"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "colchicine-clarithromycin",
+      "text": "colchicine 0.5 mg, clarithromycin 500 mg",
+      "expect": {
+        "generics_include": ["colchicine", "clarithromycin"],
+        "pair": ["colchicine", "clarithromycin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "tramadol-fluoxetine",
+      "text": "tramadol 50 mg, fluoxetine 20 mg",
+      "expect": {
+        "generics_include": ["tramadol", "fluoxetine"],
+        "pair": ["tramadol", "fluoxetine"]
+      }
+    },
+    {
+      "id": "amoxicillin-paracetamol",
+      "text": "amoxicillin 500 mg, paracetamol 650 mg",
+      "expect": {
+        "generics_include": ["amoxicillin", "paracetamol"],
+        "pair": ["amoxicillin", "paracetamol"],
+        "banner": false
+      }
+    },
+    {
+      "id": "metformin-sitagliptin",
+      "text": "metformin 500 mg, sitagliptin 100 mg",
+      "expect": {
+        "generics_include": ["metformin", "sitagliptin"],
+        "pair": ["metformin", "sitagliptin"],
+        "banner": false
+      }
+    },
+    {
+      "id": "telma-amlong",
+      "text": "Telma 40, Amlong 5",
+      "expect": {
+        "min_normalized": 2,
+        "generics_include": ["telmisartan", "amlodipine"],
+        "pair": ["telmisartan", "amlodipine"]
+      }
+    },
+    {
+      "id": "augmentin-warfarin",
+      "text": "Augmentin 625, warfarin 5 mg",
+      "expect": {
+        "fdc_min_components": 2,
+        "generics_include": ["warfarin", "amoxycillin"],
+        "pair": ["amoxycillin", "warfarin"]
+      }
+    },
+    {
+      "id": "dolo-warfarin",
+      "text": "Dolo 650, warfarin 5 mg",
+      "expect": {
+        "generics_include": ["paracetamol", "warfarin"],
+        "pair": ["paracetamol", "warfarin"]
+      }
+    },
+    {
+      "id": "warfarin-alcohol",
+      "text": "warfarin 5 mg; patient drinks alcohol most evenings",
+      "expect": {
+        "generics_include": ["warfarin"],
+        "avoid_substance": "alcohol"
+      }
+    },
+    {
+      "id": "simvastatin-grapefruit",
+      "text": "simvastatin 40 mg, avoid grapefruit juice as noted on the script",
+      "expect": {
+        "generics_include": ["simvastatin"],
+        "avoid_substance": "grapefruit"
+      }
+    },
+    {
+      "id": "warfarin-aspirin-ckd",
+      "text": "warfarin 5 mg, aspirin 75 mg",
+      "patient_context": "Age 78, eGFR 28.",
+      "expect": {
+        "generics_include": ["warfarin", "aspirin"],
+        "pair": ["warfarin", "aspirin"],
+        "grade": "A",
+        "patient_note": true
+      }
+    },
+    {
+      "id": "enalapril-spironolactone",
+      "text": "enalapril 10 mg, spironolactone 25 mg",
+      "expect": {
+        "generics_include": ["enalapril", "spironolactone"],
+        "pair": ["enalapril", "spironolactone"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "ciprofloxacin-tizanidine",
+      "text": "ciprofloxacin 500 mg, tizanidine 2 mg",
+      "expect": {
+        "generics_include": ["ciprofloxacin", "tizanidine"],
+        "pair": ["ciprofloxacin", "tizanidine"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "verapamil-simvastatin",
+      "text": "verapamil 120 mg, simvastatin 40 mg",
+      "expect": {
+        "generics_include": ["verapamil", "simvastatin"],
+        "pair": ["verapamil", "simvastatin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "atorvastatin-clarithromycin",
+      "text": "atorvastatin 40 mg, clarithromycin 500 mg",
+      "expect": {
+        "generics_include": ["atorvastatin", "clarithromycin"],
+        "pair": ["atorvastatin", "clarithromycin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "selegiline-sertraline",
+      "text": "selegiline 5 mg, sertraline 50 mg",
+      "expect": {
+        "generics_include": ["selegiline", "sertraline"],
+        "pair": ["selegiline", "sertraline"]
+      }
+    }
+  ]
+}

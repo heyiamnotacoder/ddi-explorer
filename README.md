@@ -69,5 +69,12 @@ Offline unit tests (no live API keys):
 cd backend && ../.venv/bin/python -m pytest tests/ -q
 ```
 
-A ~30-pair full live `/api/check` eval lives on a **branch off main**, not in
-default pytest. See `PLAN.md` and `AGENTS.md` for locked decisions.
+A ~30-pair full live `/api/check` eval lives on branch **`eval/live-check-30`**,
+not in default pytest. On that branch:
+
+```bash
+.venv/bin/python eval/run_eval.py --dry-run   # schema only
+.venv/bin/python eval/run_eval.py             # 30 live cases; needs backend/.env keys
+```
+
+See `eval/README.md`. Do not merge eval cases onto `main`.

@@ -10,6 +10,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+
+# Live eval reports (eval/live-check-30 branch)
+eval/results/
 .mypy_cache/
 .ruff_cache/
 

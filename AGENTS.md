@@ -63,6 +63,10 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │       └── web_resolve.py  dataset+RxNav misses via scrubbed web search
 │   ├── scripts/fetch_indian_dataset.py
 │   └── tests/                pytest (offline; no live API keys)
+├── eval/                     THIS BRANCH ONLY: 30 live /api/check cases
+│   ├── cases.json
+│   ├── run_eval.py
+│   └── README.md
 └── frontend/                 React 19 + Vite 8 + TypeScript
     └── src/
         ├── App.tsx           single-screen UI
@@ -348,6 +352,10 @@ cd frontend && npm install && npm run dev   # http://127.0.0.1:5173
 # tests (offline; no network / no LLM)
 cd backend && ../.venv/bin/python -m pytest tests/ -q
 
+# live eval (this branch only; needs backend/.env keys; not default pytest)
+.venv/bin/python eval/run_eval.py --dry-run
+.venv/bin/python eval/run_eval.py
+
 # optional local OCR
 brew install tesseract
 
@@ -398,7 +406,7 @@ pair only.
 
 When changing scrub, normalize, web resolve, ranking, overlay, or LLM wiring,
 extend these tests. Do not add tests that need live API keys. The ~30-pair **full live
-`/api/check` eval lives on a branch off main** (not default pytest).
+`/api/check` eval is `eval/run_eval.py` on this branch** (not default pytest).
 
 Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may
 see a raw image in v1; its transcript is still scrubbed. Image-level
@@ -434,7 +442,7 @@ retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 - Tesseract often absent; health reports `"tesseract": false`; vision fallback used.
 - Image-level PHI redaction before vision is **not v1** (locked; do not build it here).
 - Duplicate-therapy detection (two NSAIDs) omitted on purpose (PLAN §6 #8).
-- Live 30-pair full `/api/check` eval is a **branch off main**, not default pytest.
+- Live 30-pair full `/api/check` eval lives on **this branch** (`eval/live-check-30`), not default pytest and not on `main`.
 
 ---
 
