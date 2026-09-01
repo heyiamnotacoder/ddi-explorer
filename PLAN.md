@@ -21,7 +21,7 @@ Locked review decisions (below) are current product rules, not backlog guesses.
 | OCR / vision honesty (v1) | Hybrid: local Tesseract → low confidence → vision-LLM. **Raw image may reach vision.** Transcript is scrubbed before extract. **Image-level redaction is not v1** |
 | Users/scope | Clinician-facing decision support (disclaimers, auditability, citation-required grading) |
 | Evidence retrieval | **Waterfall with early exit** (see §4). Tools are REST wrappers in `agent/tools.py` (openFDA, PubMed eutils, ClinicalTrials.gov v2, Firecrawl). MCP servers are optional, not required |
-| Persistence | Stateless backend. Browser history is **up to 5 scrubbed `/api/check` snapshots** in localStorage (drugs, grades, citations). Never raw patient/timing text, images, or unscrubbed Rx text |
+| Persistence | Stateless backend. Browser history is **up to 5 scrubbed `/api/check` snapshots** in localStorage (drugs, grades, citations). Never raw patient/timing text, images, or unscrubbed Rx text. Process-local pair cache is component names → graded result only |
 | Grade A patient/dose/timing | Deterministic overlay on the known pair — no extra LLM. Extracted dose/schedule stay on `NormalizedDrug` |
 | Avoid-with | openFDA label-backed lookup of non-drugs vs listed medications. Hits cite retrieved records. No hit → honest empty copy. No LLM |
 | Eval | ~30 **full live `/api/check`** cases on a **branch off main**, not default pytest. Offline unit tests stay on `main` and must not need live API keys |
@@ -200,7 +200,7 @@ CORS allows `http://localhost:5173` only.
 | **P5** Evidence tools | REST wrappers: PubMed eutils, ClinicalTrials.gov v2, Firecrawl (MCP optional) |
 | **P6** OCR | Tesseract + confidence gate + vision fallback. Image-level redaction is **not v1** |
 | **P7** Output & UI | Rubric assembler, banner/categories/"severe if", **pair matrix**, disclaimers |
-| **P8** Hardening | Rate limits, pair→result cache, **eval branch** of ~30 live full `/api/check` cases |
+| **P8** Hardening | **Pair cache + 429→pair error shipped.** Remaining: **eval branch** of ~30 live full `/api/check` cases |
 
 **Testing spine:** offline pytest on `main` (no live keys). Golden set of ~30
 known pairs as **full live `/api/check`** on a **branch off main** (not default

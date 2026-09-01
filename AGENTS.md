@@ -57,7 +57,8 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │       ├── llm.py        litellm adapter
 │   │       ├── extract.py    first LLM call (drugs from scrubbed text)
 │   │       ├── alternatives.py  second loop: which drug to change
-│   │       ├── tools.py      openFDA, PubMed, CT.gov, Firecrawl
+│   │       ├── tools.py      openFDA, PubMed, CT.gov, Firecrawl (429 → pair error)
+│   │       ├── pair_cache.py process-local pair results; no patient text
 │   │       ├── waterfall.py  per-pair A→B→C early exit
 │   │       └── web_resolve.py  dataset+RxNav misses via scrubbed web search
 │   ├── scripts/fetch_indian_dataset.py
@@ -207,7 +208,11 @@ Hard rules (also in the synthesizer prompt):
 - Patient context present → `patient_specific_note`. Absent → `severe_if[]`.
 
 Pairs run with `PAIR_CONCURRENCY` (default 5). One pair failing must not fail
-the whole request (`source_tier="error"`).
+the whole request (`source_tier="error"`). A tool HTTP 429 is that pair’s
+error, not “no DDI”, and does not abort other pairs. Identical component
+pairs reuse a process-local cache (`agent/pair_cache.py`); hits keep the
+same grade. The cache stores graded pair fields only — never patient notes,
+raw Rx text, or error-tier rows.
 
 Non-drugs (alcohol, tobacco, grapefruit, herbals) skip pair-checking. Each is
 looked up on listed drugs’ openFDA `drug_interactions` / `food_interactions`.
@@ -374,6 +379,10 @@ are not invented.
 scrubbed web verification; invented generics not in the page are dropped;
 already-resolved names skip the web.
 
+`backend/tests/test_pair_cache.py` — identical pairs hunt once; cache hits
+keep the grade; patient notes never enter the cache; a tool 429 errors that
+pair only.
+
 When changing scrub, normalize, web resolve, ranking, overlay, or LLM wiring,
 extend these tests. Do not add tests that need live API keys. The ~30-pair **full live
 `/api/check` eval lives on a branch off main** (not default pytest).
@@ -412,7 +421,6 @@ retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 - Tesseract often absent; health reports `"tesseract": false`; vision fallback used.
 - Image-level PHI redaction before vision is **not v1** (locked; do not build it here).
 - Duplicate-therapy detection (two NSAIDs) omitted on purpose (PLAN §6 #8).
-- Pair-result cache and rate limits are later work (PLAN P8).
 - Live 30-pair full `/api/check` eval is a **branch off main**, not default pytest.
 
 ---

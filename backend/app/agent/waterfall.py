@@ -11,6 +11,10 @@
 
 Anti-hallucination rule: the LLM may ONLY cite records handed to it by a
 tool in this run. No retrieved record -> no citation -> no claim.
+
+A 429 from any evidence tool marks that pair `source_tier="error"` (not
+"no DDI"). Identical component pairs reuse a process-local cache; the
+cache never stores patient notes or error-tier rows.
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ import re
 
 from ..config import get_settings
 from ..models import Category, Citation, Grade, PairResult
-from . import llm, tools
+from . import llm, pair_cache, tools
 
 _STRONG_PUBTYPES = (
     "Randomized Controlled Trial",
@@ -253,10 +257,28 @@ def _none_pair(a: str, b: str) -> PairResult:
     )
 
 
+def _error_pair(a: str, b: str, reason: str) -> PairResult:
+    return PairResult(
+        drugs=(a, b), grade=None, category=Category.NONE,
+        summary=reason, source_tier="error",
+    )
+
+
 async def evaluate_pair(drug_a: str, drug_b: str,
                         patient_context: str | None = None) -> PairResult:
     a, b = drug_a.lower(), drug_b.lower()
+    hit = pair_cache.get(a, b)
+    if hit is not None:
+        return hit.model_copy(update={"drugs": (a, b)})
+    try:
+        result = await _hunt_pair(a, b, patient_context)
+    except tools.ToolRateLimit as e:
+        return _error_pair(a, b, f"Evidence tool rate-limited ({e.tool}).")
+    pair_cache.put(result)
+    return result
 
+
+async def _hunt_pair(a: str, b: str, patient_context: str | None) -> PairResult:
     # ---- Tier 1: openFDA labels -------------------------------------------
     fda = await tools.openfda_label_check(a, b)
     if fda:
@@ -332,16 +354,31 @@ async def evaluate_pair(drug_a: str, drug_b: str,
 
 async def evaluate_pairs(pairs: list[tuple[str, str]],
                          patient_context: str | None = None) -> list[PairResult]:
-    """Bounded-concurrency fan-out over unknown pairs."""
+    """Bounded-concurrency fan-out. Duplicate component pairs hunt once."""
     sem = asyncio.Semaphore(get_settings().pair_concurrency)
+    computed: dict[tuple[str, str], PairResult] = {}
 
-    async def one(a: str, b: str) -> PairResult:
+    async def hunt(a: str, b: str) -> None:
+        k = pair_cache.key(a, b)
         async with sem:
             try:
-                return await evaluate_pair(a, b, patient_context)
+                computed[k] = await evaluate_pair(a, b, patient_context)
             except Exception as e:  # noqa: BLE001 — never lose a whole run to one pair
-                return PairResult(drugs=(a, b), grade=None, category=Category.NONE,
-                                  summary=f"Evaluation failed: {type(e).__name__}",
-                                  source_tier="error")
+                computed[k] = _error_pair(
+                    a.lower(), b.lower(),
+                    f"Evaluation failed: {type(e).__name__}",
+                )
 
-    return await asyncio.gather(*(one(a, b) for a, b in pairs))
+    unique: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for a, b in pairs:
+        k = pair_cache.key(a, b)
+        if k not in seen:
+            seen.add(k)
+            unique.append((a, b))
+    await asyncio.gather(*(hunt(a, b) for a, b in unique))
+    out: list[PairResult] = []
+    for a, b in pairs:
+        src = computed[pair_cache.key(a, b)]
+        out.append(src.model_copy(update={"drugs": (a.lower(), b.lower())}))
+    return out

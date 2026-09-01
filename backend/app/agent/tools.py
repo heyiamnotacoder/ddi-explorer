@@ -19,8 +19,22 @@ import httpx
 from ..config import get_settings
 
 
+class ToolRateLimit(Exception):
+    """HTTP 429 from an evidence tool. That pair degrades to error, not 'no DDI'."""
+
+    def __init__(self, tool: str):
+        self.tool = tool
+        super().__init__(f"{tool} rate-limited (429)")
+
+
 def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=get_settings().http_timeout)
+
+
+def _raise_http(r: httpx.Response, tool: str) -> None:
+    if r.status_code == 429:
+        raise ToolRateLimit(tool)
+    r.raise_for_status()
 
 
 # --------------------------------------------------------------------------
@@ -44,7 +58,7 @@ async def openfda_label_check(drug_a: str, drug_b: str) -> list[dict]:
                 r = await client.get("https://api.fda.gov/drug/label.json", params=params)
                 if r.status_code == 404:
                     continue
-                r.raise_for_status()
+                _raise_http(r, "openfda")
                 for rec in r.json().get("results", []):
                     results.append({
                         "subject_drug": subject,
@@ -96,7 +110,7 @@ async def openfda_substance_check(drug: str, terms: list[str]) -> list[dict]:
             r = await client.get("https://api.fda.gov/drug/label.json", params=params)
             if r.status_code == 404:
                 return []
-            r.raise_for_status()
+            _raise_http(r, "openfda")
             out: list[dict] = []
             for rec in r.json().get("results", []):
                 openfda = rec.get("openfda") or {}
@@ -170,14 +184,14 @@ async def pubmed_search(drug_a: str, drug_b: str, *, retmax: int = 5) -> list[di
                                  params={"db": "pubmed", "term": query,
                                          "retmax": retmax, "retmode": "json",
                                          "sort": "relevance"})
-            r.raise_for_status()
+            _raise_http(r, "pubmed")
             pmids = r.json().get("esearchresult", {}).get("idlist", [])
             if not pmids:
                 return []
             r2 = await client.get(f"{EUTILS}/esummary.fcgi",
                                   params={"db": "pubmed", "id": ",".join(pmids),
                                           "retmode": "json"})
-            r2.raise_for_status()
+            _raise_http(r2, "pubmed")
             data = r2.json().get("result", {})
             # Fetch abstracts too — titles alone are not gradeable evidence
             abstracts = await _fetch_abstracts(client, pmids)
@@ -205,7 +219,7 @@ async def _fetch_abstracts(client: httpx.AsyncClient, pmids: list[str]) -> dict[
         r = await client.get(f"{EUTILS}/efetch.fcgi",
                              params={"db": "pubmed", "id": ",".join(pmids),
                                      "rettype": "abstract", "retmode": "xml"})
-        r.raise_for_status()
+        _raise_http(r, "pubmed")
         out: dict[str, str] = {}
         for article in ET.fromstring(r.text).iter("PubmedArticle"):
             pmid_el = article.find(".//PMID")
@@ -239,7 +253,7 @@ async def clinicaltrials_search(drug_a: str, drug_b: str, *, page_size: int = 5)
                 "https://clinicaltrials.gov/api/v2/studies",
                 params={"query.term": term, "pageSize": page_size,
                         "fields": "NCTId,BriefTitle,OverallStatus,Phase,StudyType,LeadSponsorName"})
-            r.raise_for_status()
+            _raise_http(r, "clinicaltrials")
             out = []
             for st in r.json().get("studies", []):
                 proto = st.get("protocolSection", {})
@@ -272,7 +286,7 @@ async def web_search(query: str, *, limit: int = 5) -> list[dict]:
                 "https://api.firecrawl.dev/v1/search",
                 headers={"Authorization": f"Bearer {settings.firecrawl_api_key}"},
                 json={"query": query, "limit": limit})
-            r.raise_for_status()
+            _raise_http(r, "firecrawl")
             return [{"title": d.get("title", ""), "url": d.get("url", ""),
                      "snippet": d.get("description", "")}
                     for d in r.json().get("data", [])]
@@ -290,7 +304,7 @@ async def web_fetch(url: str) -> str:
                 "https://api.firecrawl.dev/v1/scrape",
                 headers={"Authorization": f"Bearer {settings.firecrawl_api_key}"},
                 json={"url": url, "formats": ["markdown"], "onlyMainContent": True})
-            r.raise_for_status()
+            _raise_http(r, "firecrawl")
             return (r.json().get("data", {}).get("markdown") or "")[:6000]
         except httpx.HTTPError:
             return ""
