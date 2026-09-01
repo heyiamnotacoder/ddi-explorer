@@ -23,7 +23,7 @@ Locked review decisions (below) are current product rules, not backlog guesses.
 | Evidence retrieval | **Waterfall with early exit** (see §4). Tools are REST wrappers in `agent/tools.py` (openFDA, PubMed eutils, ClinicalTrials.gov v2, Firecrawl). MCP servers are optional, not required |
 | Persistence | Stateless backend. Browser history is **not shipped**; when added, **scrubbed snapshots only** (never raw patient/timing text) |
 | Grade A patient/dose/timing | Deterministic overlay on the known pair — no extra LLM. Extracted dose/schedule stay on `NormalizedDrug` |
-| Avoid-with | openFDA label-backed lookup (follow-up work; v1 stub lists non-drugs only) |
+| Avoid-with | openFDA label-backed lookup of non-drugs vs listed medications. Hits cite retrieved records. No hit → honest empty copy. No LLM |
 | Eval | ~30 **full live `/api/check`** cases on a **branch off main**, not default pytest. Offline unit tests stay on `main` and must not need live API keys |
 
 ---
@@ -134,7 +134,7 @@ Unfetched search hits are not citations.
 |---|---|---|
 | 1 | Combination products / FDCs | Split into components; every component pair checked |
 | 2 | Indian brand names | Local dataset fuzzy match → generic; misses → unresolved (websearch verification is follow-up) |
-| 3 | Non-drugs (alcohol, tobacco, herbals, grapefruit) | Rejected from pair-checking; separate **"Avoid with medications"** (label-backed lookup is follow-up; v1 lists the substance) |
+| 3 | Non-drugs (alcohol, tobacco, herbals, grapefruit) | Rejected from pair-checking; **"Avoid with medications"** from openFDA labels, citations mapped to retrieved records; no hit → honest empty copy |
 | 4 | N-drug explosion | Two-tier: local pre-filter resolves known pairs free; only unknown pairs hit agent. Cap 15 drugs, bounded concurrency, **severity-sorted pair matrix on the results screen** |
 | 5 | Missing dose | Conditional phrasing ("DDI possible if dose > X") |
 | 6 | Patient modulation | §5 |
@@ -160,7 +160,7 @@ POST /api/check
                category: "interaction"|"timing"|"contraindicated"|"none",
                severe_if[]?, patient_specific_note?, dose_condition?}],
       contraindicated_banner: [...],
-      avoid_with_medications: [...],
+      avoid_with_medications: [{substance, medications[], note, citations[]}],
       insufficient_evidence: [...],
       disclaimer }
 

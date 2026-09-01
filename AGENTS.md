@@ -21,7 +21,7 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
    - known pairs via RxNav (Grade A, no LLM tokens)
    - unknown pairs via an early-exit evidence waterfall
 6. Assemble results: contraindication banner, timing-manageable pairs,
-   “avoid with medications”, patient-specific notes, citations, disclaimer.
+   label-backed “avoid with medications”, patient-specific notes, citations, disclaimer.
 7. Optional second loop (button): rank which interacting drug is safest to
    change (prefer symptomatic / lower-ADR over disease-modifying), propose
    same-indication substitutes, recheck each vs the rest of the list.
@@ -51,7 +51,8 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │   │   ├── scrubber.py
 │   │   │   ├── normalize.py
 │   │   │   ├── prefilter.py
-│   │   │   └── overlay.py    Grade A timing/dose/patient copy, no LLM
+│   │   │   ├── overlay.py    Grade A timing/dose/patient copy, no LLM
+│   │   │   └── avoid.py      non-drug vs labels, mapped citations, no LLM
 │   │   └── agent/            LLM + evidence tools
 │   │       ├── llm.py        litellm adapter
 │   │       ├── extract.py    first LLM call (drugs from scrubbed text)
@@ -107,7 +108,7 @@ RxNav pre-filter        known pairs → Grade A (source_tier="local")
         ▼
 waterfall               unknown pairs only, early exit
         ▼
-assemble                banner, avoid-with, insufficient, disclaimer
+assemble                banner, label-backed avoid-with, insufficient, disclaimer
         ▼
 [button] alternatives   rank replaceable drug → propose substitutes
                         → recheck vs leftover list (prefilter + waterfall)
@@ -202,8 +203,11 @@ Hard rules (also in the synthesizer prompt):
 Pairs run with `PAIR_CONCURRENCY` (default 5). One pair failing must not fail
 the whole request (`source_tier="error"`).
 
-Non-drugs (alcohol, tobacco, grapefruit, herbals) skip pair-checking and land
-in `avoid_with_medications`.
+Non-drugs (alcohol, tobacco, grapefruit, herbals) skip pair-checking. Each is
+looked up on listed drugs’ openFDA `drug_interactions` / `food_interactions`.
+Hits become `AvoidWithItem` rows with citations mapped to retrieved records
+(`pipeline/avoid.py`). No record → honest empty copy (never “pair checking
+skipped”). No LLM, so herbals are never invented.
 
 ### 7. Alternatives — `agent/alternatives.py` + `POST /api/alternatives`
 
@@ -258,7 +262,8 @@ Defined in `backend/app/main.py` and `models.py`.
 `NormalizedDrug` also carries `dose` and `schedule` when extract found them.
 
 `CheckResponse`: `scrubbed_text`, `normalized_drugs`, `unresolved_drugs`,
-`pairs`, `contraindicated_banner`, `avoid_with_medications`,
+`pairs`, `contraindicated_banner`,
+`avoid_with_medications` (`{substance, medications[], note, citations[]}`),
 `insufficient_evidence`, `disclaimer`.
 
 `AlternativesRequest`: `{ normalized_drugs, pairs, patient_context?, avoid_with_medications? }`
@@ -354,6 +359,10 @@ negative trial is C with `evidence_conflict`; unfetched URLs are not citations.
 copy / patient notes without a synthesizer call; extract dose and schedule
 survive on `NormalizedDrug`.
 
+`backend/tests/test_avoid.py` — non-drugs stay out of pair-checking; label hits
+cite retrieved setids; no hit / unmapped record → honest empty copy; herbals
+are not invented.
+
 When changing scrub, normalize, ranking, overlay, or LLM wiring, extend these
 tests. Do not add tests that need live API keys. The ~30-pair **full live
 `/api/check` eval lives on a branch off main** (not default pytest).
@@ -366,7 +375,8 @@ Citation invariant: a graded `interaction` must map **every** cited identifier
 back to tool records (`waterfall._citations_from`). Empty or unmapped citations
 become `source_tier="insufficient"` (no A/B/C). Invented PMIDs never appear.
 The results screen lists those pairs separately; the alternatives panel shows
-its own disclaimer when open.
+its own disclaimer when open. Avoid-with citations use the same mapper against
+retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 
 ---
 

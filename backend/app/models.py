@@ -71,13 +71,21 @@ class CheckRequest(BaseModel):
     timing: str | None = None
 
 
+class AvoidWithItem(BaseModel):
+    """Non-drug vs listed medications, from openFDA labels only."""
+    substance: str
+    medications: list[str] = Field(default_factory=list)
+    note: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
 class CheckResponse(BaseModel):
     scrubbed_text: str                       # what the agent actually saw (transparency)
     normalized_drugs: list[NormalizedDrug]
     unresolved_drugs: list[str]
     pairs: list[PairResult]
     contraindicated_banner: list[PairResult]
-    avoid_with_medications: list[str]        # alcohol/tobacco/herbal notes
+    avoid_with_medications: list[AvoidWithItem]
     insufficient_evidence: list[tuple[str, str]]
     disclaimer: str
 
@@ -94,7 +102,7 @@ class AlternativesRequest(BaseModel):
     pairs: list[PairResult]
     patient_context: str | None = None
     scrubbed_text: str | None = None  # already de-identified /api/check input
-    avoid_with_medications: list[str] = Field(default_factory=list)
+    avoid_with_medications: list[AvoidWithItem] = Field(default_factory=list)
 
 
 class ReplaceableDrug(BaseModel):

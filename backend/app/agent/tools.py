@@ -57,6 +57,75 @@ async def openfda_label_check(drug_a: str, drug_b: str) -> list[dict]:
     return results
 
 
+async def openfda_substance_check(drug: str, terms: list[str]) -> list[dict]:
+    """Search one drug's label for non-drug terms in interaction fields.
+
+    Only this direction (drug label mentions the substance). Alcohol / herbals
+    are not queried as if they were the labeled product.
+    """
+    drug = (drug or "").replace('"', "").strip()
+    cleaned = []
+    seen: set[str] = set()
+    for raw in terms:
+        t = str(raw).replace('"', "").strip()
+        if not t:
+            continue
+        key = t.lower()
+        if key not in seen:
+            seen.add(key)
+            cleaned.append(t)
+    if not drug or not cleaned:
+        return []
+    field_or = " OR ".join(
+        f'{field}:"{t}"'
+        for t in cleaned
+        for field in ("drug_interactions", "food_interactions")
+    )
+    settings = get_settings()
+    params = {
+        "search": (
+            f"({field_or}) AND "
+            f'(openfda.generic_name:"{drug}" OR openfda.brand_name:"{drug}")'
+        ),
+        "limit": 3,
+    }
+    if settings.openfda_api_key:
+        params["api_key"] = settings.openfda_api_key
+    try:
+        async with _client() as client:
+            r = await client.get("https://api.fda.gov/drug/label.json", params=params)
+            if r.status_code == 404:
+                return []
+            r.raise_for_status()
+            out: list[dict] = []
+            for rec in r.json().get("results", []):
+                openfda = rec.get("openfda") or {}
+                names = openfda.get("generic_name") or [drug]
+                title_name = names[0] if names else drug
+                setid = rec.get("setid")
+                if setid:
+                    url = (
+                        "https://dailymed.nlm.nih.gov/dailymed/"
+                        f"drugInfo.cfm?setid={urllib.parse.quote(str(setid))}"
+                    )
+                else:
+                    url = (
+                        "https://dailymed.nlm.nih.gov/dailymed/search.cfm"
+                        f"?query={urllib.parse.quote(drug)}"
+                    )
+                out.append({
+                    "subject_drug": drug,
+                    "title": f"{title_name} labeling",
+                    "interactions_text": " ".join(rec.get("drug_interactions") or [])[:3000],
+                    "food_interactions_text": " ".join(rec.get("food_interactions") or [])[:2000],
+                    "setid": setid,
+                    "url": url,
+                })
+            return out
+    except httpx.HTTPError:
+        return []
+
+
 # --------------------------------------------------------------------------
 # Tier 2 — PubMed (NCBI eutils)
 # --------------------------------------------------------------------------

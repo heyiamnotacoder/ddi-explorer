@@ -31,13 +31,20 @@ export interface NormalizedDrug {
   schedule?: string | null;
 }
 
+export interface AvoidWithItem {
+  substance: string;
+  medications: string[];
+  note: string;
+  citations: Citation[];
+}
+
 export interface CheckResponse {
   scrubbed_text: string;
   normalized_drugs: NormalizedDrug[];
   unresolved_drugs: string[];
   pairs: PairResult[];
   contraindicated_banner: PairResult[];
-  avoid_with_medications: string[];
+  avoid_with_medications: AvoidWithItem[];
   insufficient_evidence: [string, string][];
   disclaimer: string;
 }
@@ -94,7 +101,7 @@ export async function suggestAlternatives(body: {
   pairs: PairResult[];
   patient_context?: string;
   scrubbed_text?: string;
-  avoid_with_medications?: string[];
+  avoid_with_medications?: AvoidWithItem[];
 }): Promise<AlternativesResponse> {
   const r = await fetch("/api/alternatives", {
     method: "POST",

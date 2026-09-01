@@ -24,6 +24,7 @@ from .models import (
     PairResult,
     ReplaceableDrug,
 )
+from .pipeline import avoid as avoid_mod
 from .pipeline import normalize as norm
 from .pipeline import ocr, overlay, prefilter, scrubber
 
@@ -152,10 +153,11 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     banner = [p for p in all_pairs if p.category == Category.CONTRAINDICATED]
     insufficient = [p.drugs for p in all_pairs if p.source_tier == "insufficient"]
 
-    avoid: list[str] = []
-    for substance in extracted.get("non_drugs", []):
-        avoid.append(f"{substance}: check against all listed medications "
-                     f"(non-drug substance — pair checking skipped)")
+    avoid_with = await avoid_mod.lookup(
+        extracted.get("non_drugs") or [],
+        drugs=normalized,
+        extra_names=unresolved,
+    )
 
     return CheckResponse(
         scrubbed_text=scrubbed.text,
@@ -163,7 +165,7 @@ async def run_check(req: CheckRequest) -> CheckResponse:
         unresolved_drugs=unresolved,
         pairs=all_pairs,
         contraindicated_banner=banner,
-        avoid_with_medications=avoid,
+        avoid_with_medications=avoid_with,
         insufficient_evidence=insufficient,
         disclaimer=DISCLAIMER,
     )
@@ -226,7 +228,8 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
         try:
             proposed = await alts.propose(
                 req.normalized_drugs, req.pairs, candidates, ctx,
-                req.avoid_with_medications, rx_text,
+                [f"{a.substance}: {a.note}" for a in req.avoid_with_medications],
+                rx_text,
             )
         except Exception:  # noqa: BLE001 — ranking still useful if the LLM fails
             proposed = {}

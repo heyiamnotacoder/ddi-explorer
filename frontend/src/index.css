@@ -432,6 +432,10 @@ a:hover { color: var(--copper); }
 .warn-box { background: #f8edd4; border: 1px solid #e0c98a; }
 .avoid-box { background: #ece7f8; border: 1px solid #c8bde8; }
 .avoid-box ul { margin: 6px 0 0; padding-left: 18px; }
+.avoid-box li { margin: 8px 0; }
+.avoid-box li p { margin: 4px 0 0; }
+.avoid-box .avoid-miss { color: var(--muted); }
+.avoid-box .avoid-miss strong { color: var(--ink); }
 
 .matrix-wrap { margin-top: 14px; overflow-x: auto; }
 

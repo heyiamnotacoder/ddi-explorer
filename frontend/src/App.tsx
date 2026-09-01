@@ -4,7 +4,9 @@ import {
   suggestAlternatives,
   type AlternativesResponse,
   type AlternativeSuggestion,
+  type AvoidWithItem,
   type CheckResponse,
+  type Citation,
   type Importance,
   type PairResult,
 } from "./api";
@@ -147,21 +149,48 @@ function PairCard({ p }: { p: PairResult }) {
           <ul>{p.severe_if.map((s, i) => <li key={i}>{s}</li>)}</ul>
         </div>
       )}
-      {p.citations.length > 0 && (
-        <div className="cites">
-          Sources:{" "}
-          {p.citations.map((c, i) =>
-            c.url ? (
-              <a key={i} href={c.url} target="_blank" rel="noreferrer">
-                [{c.source}{c.identifier ? ` ${c.identifier}` : ""}]
-              </a>
-            ) : (
-              <span key={i}>[{c.source}{c.identifier ? ` ${c.identifier}` : ""}]</span>
-            ),
-          )}
-        </div>
-      )}
+      <CiteList citations={p.citations} />
     </article>
+  );
+}
+
+function CiteList({ citations }: { citations: Citation[] }) {
+  if (citations.length === 0) return null;
+  return (
+    <div className="cites">
+      Sources:{" "}
+      {citations.map((c, i) =>
+        c.url ? (
+          <a key={i} href={c.url} target="_blank" rel="noreferrer">
+            [{c.source}{c.identifier ? ` ${c.identifier}` : ""}]
+          </a>
+        ) : (
+          <span key={i}>[{c.source}{c.identifier ? ` ${c.identifier}` : ""}]</span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function AvoidBox({ items }: { items: AvoidWithItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="avoid-box">
+      <strong>Avoid with these medications</strong>
+      <ul>
+        {items.map((a, i) => {
+          const hit = a.citations.length > 0;
+          return (
+            <li key={i} className={hit ? "avoid-hit" : "avoid-miss"}>
+              <strong>{a.substance}</strong>
+              {a.medications.length > 0 && ` — ${a.medications.join(", ")}`}
+              <p>{a.note}</p>
+              <CiteList citations={a.citations} />
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -506,12 +535,7 @@ export default function App() {
             </div>
           )}
 
-          {result.avoid_with_medications.length > 0 && (
-            <div className="avoid-box">
-              <strong>Avoid with these medications</strong>
-              <ul>{result.avoid_with_medications.map((a, i) => <li key={i}>{a}</li>)}</ul>
-            </div>
-          )}
+          <AvoidBox items={result.avoid_with_medications} />
 
           {ddiPairs.length > 0 && (
             <h3 className="ddi-heading">DDI pairs ({ddiPairs.length})</h3>
