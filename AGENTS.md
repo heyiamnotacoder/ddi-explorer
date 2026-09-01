@@ -65,12 +65,13 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 └── frontend/                 React 19 + Vite 8 + TypeScript
     └── src/
         ├── App.tsx           single-screen UI
-        └── api.ts            POST /api/check, /api/alternatives
+        ├── api.ts            POST /api/check, /api/alternatives
+        └── history.ts        localStorage: scrubbed CheckResponse snapshots
 ```
 
-No auth, no database. Backend is stateless. Browser history is not
-shipped; when added it is **scrubbed snapshots only** (never raw
-patient/timing text).
+No auth, no database. Backend is stateless. The browser keeps up to five
+**scrubbed** `/api/check` snapshots (drugs, grades, citations). Raw patient
+notes, timing, images, and unscrubbed text are never written.
 
 ---
 
@@ -280,8 +281,9 @@ Defined in `backend/app/main.py` and `models.py`.
 
 Frontend: one screen in `frontend/src/App.tsx`. Submit disabled until there is
 text or an image. Results sort contraindicated → A → B → C. A **pair matrix**
-(component × component) sits with the pair cards. CORS allows
-`http://localhost:5173` only.
+(component × component) sits with the pair cards. Up to five scrubbed checks
+live in `localStorage` (`history.ts`); the clinician can clear them. CORS
+allows `http://localhost:5173` only.
 
 ---
 
@@ -412,7 +414,6 @@ retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 - Duplicate-therapy detection (two NSAIDs) omitted on purpose (PLAN §6 #8).
 - Pair-result cache and rate limits are later work (PLAN P8).
 - Live 30-pair full `/api/check` eval is a **branch off main**, not default pytest.
-- Browser check history is not shipped; scrubbed snapshots only when it is.
 
 ---
 

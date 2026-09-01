@@ -10,6 +10,13 @@ import {
   type Importance,
   type PairResult,
 } from "./api";
+import {
+  clearHistory,
+  loadHistory,
+  saveCheck,
+  snapshotLabel,
+  type CheckSnapshot,
+} from "./history";
 
 type Filter = "all" | "flagged" | "timing";
 
@@ -244,7 +251,13 @@ export default function App() {
   const [timing, setTiming] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<CheckResponse | null>(null);
+  const [snapshots, setSnapshots] = useState<CheckSnapshot[]>(() => loadHistory());
+  const [result, setResult] = useState<CheckResponse | null>(
+    () => loadHistory()[0]?.result ?? null,
+  );
+  const [activeSavedAt, setActiveSavedAt] = useState<string | null>(
+    () => loadHistory()[0]?.saved_at ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [altLoading, setAltLoading] = useState(false);
@@ -275,6 +288,9 @@ export default function App() {
         timing: timing || undefined,
       });
       setResult(res);
+      const next = saveCheck(res);
+      setSnapshots(next);
+      setActiveSavedAt(next[0]?.saved_at ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -344,6 +360,24 @@ export default function App() {
   });
 
   const fdcs = result?.normalized_drugs.filter((d) => d.components.length > 1) ?? [];
+
+  const openSnapshot = (s: CheckSnapshot) => {
+    setResult(s.result);
+    setActiveSavedAt(s.saved_at);
+    setFilter("all");
+    setAlt(null);
+    setAltError(null);
+    setError(null);
+  };
+
+  const onClearHistory = () => {
+    clearHistory();
+    setSnapshots([]);
+    setActiveSavedAt(null);
+    setResult(null);
+    setAlt(null);
+    setAltError(null);
+  };
 
   return (
     <div className="app">
@@ -464,6 +498,38 @@ export default function App() {
           Five single-ingredient drugs produce 10 pairs — C(n, 2). Combination products add more.
         </p>
       </section>
+
+      {snapshots.length > 0 && (
+        <section className="history-bar panel panel-pad" aria-label="Saved checks">
+          <div className="history-head">
+            <div>
+              <p className="kicker">This browser</p>
+              <h3>Recent checks</h3>
+              <p className="history-note">
+                Scrubbed results only — drugs, grades, citations.
+                Patient notes and timing are never stored.
+              </p>
+            </div>
+            <button type="button" className="history-clear" onClick={onClearHistory}>
+              Clear history
+            </button>
+          </div>
+          <ul className="history-list">
+            {snapshots.map((s) => (
+              <li key={s.saved_at}>
+                <button
+                  type="button"
+                  className={s.saved_at === activeSavedAt ? "on" : ""}
+                  onClick={() => openSnapshot(s)}
+                  title={s.saved_at}
+                >
+                  {snapshotLabel(s)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {error && <div className="error" role="alert">{error}</div>}
 

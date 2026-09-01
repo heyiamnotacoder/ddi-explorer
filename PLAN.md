@@ -21,7 +21,7 @@ Locked review decisions (below) are current product rules, not backlog guesses.
 | OCR / vision honesty (v1) | Hybrid: local Tesseract → low confidence → vision-LLM. **Raw image may reach vision.** Transcript is scrubbed before extract. **Image-level redaction is not v1** |
 | Users/scope | Clinician-facing decision support (disclaimers, auditability, citation-required grading) |
 | Evidence retrieval | **Waterfall with early exit** (see §4). Tools are REST wrappers in `agent/tools.py` (openFDA, PubMed eutils, ClinicalTrials.gov v2, Firecrawl). MCP servers are optional, not required |
-| Persistence | Stateless backend. Browser history is **not shipped**; when added, **scrubbed snapshots only** (never raw patient/timing text) |
+| Persistence | Stateless backend. Browser history is **up to 5 scrubbed `/api/check` snapshots** in localStorage (drugs, grades, citations). Never raw patient/timing text, images, or unscrubbed Rx text |
 | Grade A patient/dose/timing | Deterministic overlay on the known pair — no extra LLM. Extracted dose/schedule stay on `NormalizedDrug` |
 | Avoid-with | openFDA label-backed lookup of non-drugs vs listed medications. Hits cite retrieved records. No hit → honest empty copy. No LLM |
 | Eval | ~30 **full live `/api/check`** cases on a **branch off main**, not default pytest. Offline unit tests stay on `main` and must not need live API keys |
@@ -178,6 +178,8 @@ GET  /api/health
 Frontend: one screen (`frontend/src/App.tsx`). Submit disabled until there is
 text or an image. Results sort contraindicated → A → B → C. A **pair matrix**
 sits with the pair cards (components × components, links into the cards).
+Refresh restores up to five **scrubbed** checks from localStorage; **Clear
+history** drops them. Patient/timing boxes are not persisted.
 A **Suggest safer alternatives** button under the pair results runs the
 second loop: change the lowest-importance interacting drug (adjuvant
 before controller before anchor); timing pairs stay on a schedule.
@@ -209,6 +211,6 @@ CI pytest) — e.g. warfarin+aspirin → A, MAOI+SSRI → contraindicated banner
 ## 9. Open Assumptions (env-swappable)
 
 1. ⚙️ Vision fallback default = Claude (`VISION_MODEL`). Gemini needs `GEMINI_API_KEY`.
-2. ⚙️ Stateless backend; browser-local history, when added, is scrubbed snapshots only.
+2. ⚙️ Stateless backend; browser-local history is scrubbed `/api/check` snapshots only (max 5). Never raw patient/timing text.
 3. Indian dataset (GitHub, scraped from 1mg) is acceptable for v1 — licensing/data-freshness caveat noted; websearch fallback covers dataset+RxNav misses.
 4. Evidence tools are REST wrappers in-tree. MCP servers are optional later; they are not required to run the app.
