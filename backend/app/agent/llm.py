@@ -1,7 +1,7 @@
 """Provider-agnostic LLM access via litellm.
 
-Default reasoning model: deepseek-v4-flash (set LLM_MODEL to swap).
-Vision model is a SEPARATE setting — DeepSeek is text-only.
+Default reasoning model: anthropic/claude-sonnet-5 (set LLM_MODEL to swap).
+Vision is a SEPARATE setting — DeepSeek is text-only.
 """
 from __future__ import annotations
 

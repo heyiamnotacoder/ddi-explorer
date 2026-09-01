@@ -58,15 +58,16 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │       ├── tools.py      openFDA, PubMed, CT.gov, Firecrawl
 │   │       └── waterfall.py  per-pair A→B→C early exit
 │   ├── scripts/fetch_indian_dataset.py
-│   └── tests/                pytest (offline: normalize + scrubber + alternatives)
+│   └── tests/                pytest (offline; no live API keys)
 └── frontend/                 React 19 + Vite 8 + TypeScript
     └── src/
         ├── App.tsx           single-screen UI
         └── api.ts            POST /api/check, /api/alternatives
 ```
 
-No auth, no database. Backend is stateless. Any history would be
-browser-only (`localStorage` is planned; not required today).
+No auth, no database. Backend is stateless. Browser history is not
+shipped; when added it is **scrubbed snapshots only** (never raw
+patient/timing text).
 
 ---
 
@@ -76,15 +77,14 @@ browser-only (`localStorage` is planned; not required today).
 |---|---|
 | Backend | FastAPI, uvicorn, pydantic v2, httpx |
 | Frontend | React + Vite + TypeScript; Vite proxies `/api` → `localhost:8000` |
-| LLM | litellm (provider-agnostic). Current `.env.example` default: `anthropic/claude-sonnet-5` |
-| Vision / OCR fallback | Separate `VISION_MODEL` (Claude or Gemini). DeepSeek is text-only |
+| LLM | litellm. **Default `anthropic/claude-sonnet-5`.** DeepSeek / OpenAI are swaps via `LLM_MODEL` |
+| Vision / OCR fallback | Separate `VISION_MODEL` (default Claude). DeepSeek is text-only. Gemini is a swap |
 | PHI | Microsoft Presidio + spaCy `en_core_web_lg` + Indian-specific regex |
 | Brands | Local `indian_drugs.json` (rapidfuzz) then RxNav/RxNorm |
-| Evidence | openFDA labels, PubMed eutils, ClinicalTrials.gov v2, Firecrawl |
+| Evidence | REST wrappers in `agent/tools.py`: openFDA, PubMed eutils, ClinicalTrials.gov v2, Firecrawl. MCP is optional, not required |
 | OCR | Tesseract if installed; else vision-LLM |
 
-`PLAN.md` still mentions DeepSeek as the original default and PubMed/CT.gov
-as “MCP servers”. The running code uses REST wrappers in `agent/tools.py`.
+Where `PLAN.md` and the code disagree, **code wins**. Keep both files in sync.
 
 ---
 
@@ -118,8 +118,8 @@ assemble                banner, avoid-with, insufficient, disclaimer
 - Tesseract first when `tesseract` is on `PATH`.
 - Vision fallback if missing, exception, or mean confidence below
   `OCR_CONFIDENCE_THRESHOLD` (default 0.75).
-- Vision currently receives the raw image (image-level redaction is v2).
-  Output text is still scrubbed before extraction.
+- **Honest v1:** vision may receive the raw image. Image-level redaction
+  is not v1. Output text is still scrubbed before extraction.
 
 ### 2. Scrub — `pipeline/scrubber.py`
 
@@ -133,6 +133,10 @@ never redact a dataset hit or a `Tab/Cap/Inj` span), clinical numbers
 (age, CrCl, eGFR), relative dosing (`1-0-1`, `3 months`).
 
 Placeholders look like `[PERSON_1]`, `[MRN_1]`. Extraction is told to ignore them.
+
+`scrubber.for_reasoning_llm()` is the text that may enter extract, waterfall,
+and alternatives. `llm.complete` re-scrubs prompt strings (regex-only).
+Never pass raw `req.patient_context` into a reasoning call.
 
 ### 3. Extract — `agent/extract.py`
 
@@ -250,7 +254,8 @@ Defined in `backend/app/main.py` and `models.py`.
 `keep`, `timing_first`, `disclaimer`.
 
 Frontend: one screen in `frontend/src/App.tsx`. Submit disabled until there is
-text or an image. Results sort contraindicated → A → B → C. CORS allows
+text or an image. Results sort contraindicated → A → B → C. A **pair matrix**
+(component × component) sits with the pair cards. CORS allows
 `http://localhost:5173` only.
 
 ---
@@ -274,18 +279,9 @@ text or an image. Results sort contraindicated → A → B → C. CORS allows
 
 **Never commit `backend/.env`.** Only `.env.example` (placeholders) is in git.
 
-**Startup gotcha:** pydantic loads keys into `Settings`, but `agent/llm.py`
-calls litellm without passing `api_key`. LiteLLM reads **process env**.
-`uvicorn` from `backend/` without exporting `.env` → 500
-`Missing Anthropic API Key`. Start with:
-
-```bash
-cd backend && set -a && source .env && set +a
-../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-If you fix this, pass `settings.anthropic_api_key` (or the matching provider
-key) into `litellm.acompletion` so a plain `uvicorn` works.
+Settings always load `backend/.env` (path is pinned in `config.py`, cwd
+does not matter). `llm.complete` / `complete_vision` pass the matching
+settings key into LiteLLM. Missing key raises `LLMConfigError` immediately.
 
 ---
 
@@ -299,7 +295,6 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 python -m spacy download en_core_web_lg
 cd backend && cp .env.example .env   # fill real keys
-set -a && source .env && set +a
 ../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # frontend (second terminal)
@@ -324,17 +319,23 @@ tier). Do not treat that latency as a hang.
 
 `backend/tests/test_normalize.py` — Indian exact/fuzzy/FDC split, unknown names.
 
-`backend/tests/test_scrubber.py` — PHI gone, clinical context kept, brands not
-redacted, `1-0-1` / relative time survive.
+`backend/tests/test_scrubber.py` / `test_privacy.py` — PHI gone, clinical
+context kept, brands not redacted, raw patient notes never reach extract
+or waterfall.
 
 `backend/tests/test_alternatives.py` — importance ranking, adjuvant preferred
 over anchor, timing is not a swap, safer() rejects a new contraindication.
 
-When changing scrub, normalize, or ranking, extend these tests. Do not add
-tests that need live API keys.
+`backend/tests/test_llm_json.py` / `test_prefilter.py` / `test_llm_keys.py` —
+shared JSON parse, NormalizedDrug pre-filter shape, settings keys into LiteLLM.
+
+When changing scrub, normalize, ranking, or LLM wiring, extend these tests.
+Do not add tests that need live API keys. The ~30-pair **full live
+`/api/check` eval lives on a branch off main** (not default pytest).
 
 Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may
-see a raw image today; its transcript is still scrubbed.
+see a raw image in v1; its transcript is still scrubbed. Image-level
+redaction is not v1.
 
 Citation invariant: a graded `interaction` must map `cited` identifiers back
 to tool records (`waterfall._citations_from`). Invented PMIDs are a bug.
@@ -359,14 +360,12 @@ to tool records (`waterfall._citations_from`). Invented PMIDs are a bug.
 
 ## Known gaps (do not “fix” unless asked)
 
-- LiteLLM key wiring (export `.env` or pass key explicitly) — see above.
 - Tesseract often absent; health reports `"tesseract": false`; vision fallback used.
-- Image-level PHI redaction before vision is not implemented.
+- Image-level PHI redaction before vision is **not v1** (locked; do not build it here).
 - Duplicate-therapy detection (two NSAIDs) omitted on purpose (PLAN §6 #8).
-- No pair-result cache, rate limits, or golden e2e DDI eval set (PLAN P8).
-- Frontend has no matrix view yet (PLAN mentioned it).
-- `PLAN.md` defaults (DeepSeek, Gemini vision, MCP tools) have drifted from
-  the running `.env.example` / REST tools.
+- Pair-result cache and rate limits are later work (PLAN P8).
+- Live 30-pair full `/api/check` eval is a **branch off main**, not default pytest.
+- Browser check history is not shipped; scrubbed snapshots only when it is.
 
 ---
 

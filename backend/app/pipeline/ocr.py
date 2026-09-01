@@ -5,10 +5,9 @@ Hybrid strategy:
   2. If mean confidence < threshold -> vision-LLM fallback.
 
 PRIVACY: whichever path produces the text, the caller MUST pass it through
-scrubber.scrub_text() before any reasoning-LLM call. The vision fallback
-receives the image itself — for true PHI safety the image should have
-redaction overlays applied first (v2); for v1 the vision model is only
-used for transcription and its OUTPUT is still scrubbed before use.
+scrubber.scrub_text() before any reasoning-LLM call. Honest v1: the vision
+fallback may see the raw image. Image-level redaction is not v1. The
+transcript is still scrubbed before extract.
 """
 from __future__ import annotations
 

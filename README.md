@@ -2,8 +2,11 @@
 
 Evidence-graded drug–drug interaction explorer. Single linear AI agent with
 early-exit waterfall (openFDA → PubMed/ClinicalTrials → web), PHI de-identification
-before any LLM contact, OCR support for prescription photos, and Indian brand-name
+before any reasoning LLM, OCR support for prescription photos, and Indian brand-name
 resolution.
+
+Default reasoning/vision model is Claude (`anthropic/claude-sonnet-5`). DeepSeek
+and OpenAI are swaps via `LLM_MODEL`.
 
 ## Quick start
 
@@ -12,11 +15,12 @@ resolution.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 python -m spacy download en_core_web_lg
-cd backend && cp .env.example .env   # fill in DEEPSEEK_API_KEY (+ GEMINI_API_KEY, FIRECRAWL_API_KEY)
-uvicorn app.main:app --reload        # http://localhost:8000/docs
+cd backend && cp .env.example .env   # fill ANTHROPIC_API_KEY (and FIRECRAWL_API_KEY)
+../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# keys come from backend/.env — no shell export needed
 
 # 2. Frontend (new terminal)
-cd frontend && npm install && npm run dev   # http://localhost:5173
+cd frontend && npm install && npm run dev   # http://127.0.0.1:5173
 
 # 3. Optional: local OCR (vision-LLM fallback works without it)
 brew install tesseract
@@ -28,7 +32,7 @@ brew install tesseract
 images ─▶ OCR (tesseract → vision fallback) ─┐
 text / patient context / timing ─────────────┤
                                              ▼
-                                     Presidio PHI scrub   ← nothing reaches an LLM before this
+                                     Presidio PHI scrub   ← nothing reaches a reasoning LLM before this
                                              ▼
                               LLM extraction (drugs, doses, timing)
                                              ▼
@@ -51,12 +55,19 @@ text / patient context / timing ─────────────┤
 | **C** | Case reports / weak evidence only |
 
 Contraindicated pairs surface as a banner; timing-manageable pairs get their own
-category; every claim requires a retrieved citation.
+category; every claim requires a retrieved citation. The results screen includes
+a pair matrix.
+
+v1 vision OCR may see the raw image; the transcript is still scrubbed. Image-level
+redaction is not v1.
 
 ## Tests
+
+Offline unit tests (no live API keys):
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest tests/ -q
 ```
 
-See `PLAN.md` for full design decisions and edge-case handling.
+A ~30-pair full live `/api/check` eval lives on a **branch off main**, not in
+default pytest. See `PLAN.md` and `AGENTS.md` for locked decisions.
