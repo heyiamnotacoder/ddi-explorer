@@ -15,6 +15,10 @@ function isDdi(p: PairResult) {
   return p.category === "contraindicated" || p.category === "timing" || p.grade != null;
 }
 
+function isInsufficient(p: PairResult) {
+  return p.source_tier === "insufficient";
+}
+
 const VIA: Record<string, string> = {
   indian_dataset: "Indian brand index",
   rxnav: "RxNorm",
@@ -48,7 +52,16 @@ function rank(p: PairResult) {
   return 5;
 }
 
-function GradePill({ grade, category }: { grade: string | null; category?: string }) {
+function GradePill({
+  grade,
+  category,
+  sourceTier,
+}: {
+  grade: string | null;
+  category?: string;
+  sourceTier?: string | null;
+}) {
+  if (sourceTier === "insufficient") return <span className="pill insuff">INSUFF</span>;
   if (category === "contraindicated") return <span className="pill contra">CONTRA</span>;
   if (category === "timing") return <span className="pill timing">TIMING</span>;
   if (grade === "A") return <span className="pill A">A</span>;
@@ -89,7 +102,7 @@ function SuggestionCard({ s }: { s: AlternativeSuggestion }) {
             {s.remaining_ddis.map((p, i) => (
               <li key={i}>
                 {p.drugs[0]} + {p.drugs[1]}{" "}
-                <GradePill grade={p.grade} category={p.category} />
+                <GradePill grade={p.grade} category={p.category} sourceTier={p.source_tier} />
                 {p.summary ? ` — ${p.summary}` : ""}
               </li>
             ))}
@@ -104,13 +117,14 @@ function SuggestionCard({ s }: { s: AlternativeSuggestion }) {
 }
 
 function PairCard({ p }: { p: PairResult }) {
+  const kind = isInsufficient(p) ? "insufficient" : p.category;
   return (
-    <article id={`pair-${pairKey(p.drugs[0], p.drugs[1])}`} className={`pair ${p.category}`}>
+    <article id={`pair-${pairKey(p.drugs[0], p.drugs[1])}`} className={`pair ${kind}`}>
       <div className="pair-top">
         <h4>{p.drugs[0]} + {p.drugs[1]}</h4>
         <div className="pair-meta">
           {p.severity && <span className="sev">{p.severity}</span>}
-          <GradePill grade={p.grade} category={p.category} />
+          <GradePill grade={p.grade} category={p.category} sourceTier={p.source_tier} />
         </div>
       </div>
       <p>{p.summary}</p>
@@ -144,7 +158,11 @@ function PairCard({ p }: { p: PairResult }) {
 
 function PairMatrix({ components, pairs }: { components: string[]; pairs: PairResult[] }) {
   if (components.length < 2) return null;
-  const map = new Map(pairs.filter(isDdi).map((p) => [pairKey(p.drugs[0], p.drugs[1]), p]));
+  const map = new Map(
+    pairs
+      .filter((p) => isDdi(p) || isInsufficient(p))
+      .map((p) => [pairKey(p.drugs[0], p.drugs[1]), p]),
+  );
   return (
     <div className="matrix-wrap">
       <table className="matrix">
@@ -167,7 +185,7 @@ function PairMatrix({ components, pairs }: { components: string[]; pairs: PairRe
                 return (
                   <td key={col}>
                     <a href={`#pair-${pairKey(row, col)}`}>
-                      <GradePill grade={p.grade} category={p.category} />
+                      <GradePill grade={p.grade} category={p.category} sourceTier={p.source_tier} />
                       <span className="sr-only">{label}</span>
                     </a>
                   </td>
@@ -256,6 +274,21 @@ export default function App() {
     return result.pairs.filter(isDdi).sort((a, b) => rank(a) - rank(b));
   }, [result]);
 
+  const insuffPairs = useMemo(() => {
+    if (!result) return [];
+    const fromPairs = result.pairs.filter(isInsufficient);
+    if (fromPairs.length) return fromPairs;
+    return result.insufficient_evidence.map(([a, b]) => ({
+      drugs: [a, b] as [string, string],
+      grade: null,
+      category: "interaction" as const,
+      summary: "Insufficient evidence to determine.",
+      citations: [],
+      severe_if: [],
+      source_tier: "insufficient",
+    }));
+  }, [result]);
+
   const counts = useMemo(() => {
     const c = { flagged: 0, timing: 0 };
     for (const p of ddiPairs) {
@@ -303,7 +336,7 @@ export default function App() {
             <li><span className="n">2</span><div><strong>Strip identifiers</strong> <span>names, phones, Aadhaar, MRN — before any LLM</span></div></li>
             <li><span className="n">3</span><div><strong>Resolve</strong> <span>Indian brands → RxNorm generics; FDCs split into ingredients</span></div></li>
             <li><span className="n">4</span><div><strong>Pair</strong> <span>every ingredient with every other ingredient from a different product</span></div></li>
-            <li><span className="n">5</span><div><strong>Grade</strong> <span>A labeling · B trials · C case reports · or no DDI — with citations</span></div></li>
+            <li><span className="n">5</span><div><strong>Grade</strong> <span>A labeling · B trials · C case reports · insufficient · or no DDI — with citations</span></div></li>
           </ol>
         </div>
         <div className="panel panel-pad">
@@ -320,6 +353,10 @@ export default function App() {
             <div className="grade-row">
               <span className="pill C">C</span>
               <p><b>Weak evidence.</b> Case reports, in-vitro, or mechanism only. Conflicts are disclosed, not hidden.</p>
+            </div>
+            <div className="grade-row">
+              <span className="pill insuff">INSUFF</span>
+              <p><b>Insufficient evidence.</b> Retrieved records do not answer the question, or a claim had no mapped citation. Never a silent A/B/C.</p>
             </div>
             <div className="grade-row">
               <span className="pill none">NONE</span>
@@ -480,8 +517,20 @@ export default function App() {
           )}
 
           {visible.map((p, i) => <PairCard key={i} p={p} />)}
-          {visible.length === 0 && (
+          {visible.length === 0 && insuffPairs.length === 0 && (
             <p className="empty-pairs">No drug–drug interaction found among the checked pairs.</p>
+          )}
+
+          {insuffPairs.length > 0 && (
+            <section className="insuff-section">
+              <h3 className="ddi-heading">Insufficient evidence ({insuffPairs.length})</h3>
+              <p className="insuff-intro">
+                These pairs are not graded. Either the retrieved records did not
+                answer the question, or a synthesizer citation did not map to a
+                record the tools just retrieved.
+              </p>
+              {insuffPairs.map((p, i) => <PairCard key={`insuff-${i}`} p={p} />)}
+            </section>
           )}
 
           {ddiPairs.length > 0 && (
@@ -550,6 +599,7 @@ export default function App() {
                       above and a clinical pharmacist if a change is still needed.
                     </p>
                   )}
+                  <p className="disclaimer alt-disclaimer">{alt.disclaimer}</p>
                 </div>
               )}
             </section>

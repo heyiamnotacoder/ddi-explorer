@@ -329,6 +329,9 @@ over anchor, timing is not a swap, safer() rejects a new contraindication.
 `backend/tests/test_llm_json.py` / `test_prefilter.py` / `test_llm_keys.py` —
 shared JSON parse, NormalizedDrug pre-filter shape, settings keys into LiteLLM.
 
+`backend/tests/test_waterfall_citations.py` — empty or unmapped synthesizer
+citations never earn a grade; invented PMIDs never appear.
+
 When changing scrub, normalize, ranking, or LLM wiring, extend these tests.
 Do not add tests that need live API keys. The ~30-pair **full live
 `/api/check` eval lives on a branch off main** (not default pytest).
@@ -337,8 +340,11 @@ Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may
 see a raw image in v1; its transcript is still scrubbed. Image-level
 redaction is not v1.
 
-Citation invariant: a graded `interaction` must map `cited` identifiers back
-to tool records (`waterfall._citations_from`). Invented PMIDs are a bug.
+Citation invariant: a graded `interaction` must map **every** cited identifier
+back to tool records (`waterfall._citations_from`). Empty or unmapped citations
+become `source_tier="insufficient"` (no A/B/C). Invented PMIDs never appear.
+The results screen lists those pairs separately; the alternatives panel shows
+its own disclaimer when open.
 
 ---
 

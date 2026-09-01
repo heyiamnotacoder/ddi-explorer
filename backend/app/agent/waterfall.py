@@ -46,12 +46,42 @@ verdict="insufficient": records retrieved but they do not answer the question.
 Only verdict="interaction" earns a grade."""
 
 
-def _citations_from(cited: list, pool: list[dict], source: str) -> list[Citation]:
+def _cited_list(cited) -> list:
+    if cited is None:
+        return []
+    if isinstance(cited, str):
+        return [cited] if cited.strip() else []
+    if isinstance(cited, (list, tuple, set)):
+        return list(cited)
+    return [cited]
+
+
+def _record_ids(pool: list[dict]) -> set[str]:
+    ids: set[str] = set()
+    for rec in pool:
+        for k in ("pmid", "nct_id", "setid", "url"):
+            v = rec.get(k)
+            if v:
+                ids.add(str(v).strip().lower())
+    return ids
+
+
+def _all_cited_mapped(cited, pool: list[dict]) -> bool:
+    """False if the synthesizer named any identifier the tools did not retrieve."""
+    ids = _record_ids(pool)
+    for c in _cited_list(cited):
+        s = str(c).strip().lower()
+        if s and s not in ids:
+            return False
+    return True
+
+
+def _citations_from(cited, pool: list[dict], source: str) -> list[Citation]:
     """Map LLM-cited identifiers back to REAL retrieved records only."""
     out = []
-    cited_norm = {str(c).lower() for c in cited}
+    cited_norm = {str(c).strip().lower() for c in _cited_list(cited)} - {""}
     for rec in pool:
-        ids = {str(rec.get(k, "")).lower()
+        ids = {str(rec.get(k, "")).strip().lower()
                for k in ("pmid", "nct_id", "setid", "url")} - {""}
         if ids & cited_norm:
             out.append(Citation(
@@ -78,12 +108,22 @@ async def _synthesize(drug_a: str, drug_b: str, tier_label: str,
 
 
 def _verdict_result(a: str, b: str, s: dict, grade: Grade | None,
-                    citations: list[Citation], tier: str) -> PairResult:
-    """Apply the verdict: 'none'/'insufficient' never carry a grade."""
+                    citations: list[Citation], tier: str,
+                    *, pool: list[dict] | None = None) -> PairResult:
+    """Apply the verdict: 'none'/'insufficient' never carry a grade.
+
+    An 'interaction' is graded only when every cited identifier maps to a
+    retrieved record and at least one mapped citation remains. Invented
+    PMIDs never appear on the result.
+    """
     verdict = s.get("verdict", "interaction")
     # Anti-garbage guard: parse failure or empty synthesis can never earn a grade
     if not s or (verdict == "interaction" and not s.get("summary")):
         verdict = "insufficient"
+    if verdict == "interaction":
+        cited = s.get("cited", [])
+        if not citations or (pool is not None and not _all_cited_mapped(cited, pool)):
+            verdict = "insufficient"
     if verdict in ("none", "insufficient"):
         return PairResult(
             drugs=(a, b), grade=None,
@@ -116,7 +156,7 @@ async def evaluate_pair(drug_a: str, drug_b: str,
         s = await _synthesize(a, b, "approved FDA labeling (Grade A)", fda, patient_context)
         return _verdict_result(a, b, s, Grade.A,
                                _citations_from(s.get("cited", []), fda, "openfda"),
-                               "openfda")
+                               "openfda", pool=fda)
 
     # ---- Tier 2: PubMed + ClinicalTrials.gov (parallel) -------------------
     pubs, trials = await asyncio.gather(
@@ -133,7 +173,7 @@ async def evaluate_pair(drug_a: str, drug_b: str,
             a, b, s, Grade.B,
             (_citations_from(s.get("cited", []), pubs, "pubmed")
              + _citations_from(s.get("cited", []), trials, "clinicaltrials")),
-            "pubmed_ct")
+            "pubmed_ct", pool=pubs + trials)
 
     # ---- Tier 3: weak evidence (case reports etc.) ------------------------
     weak_pool = [p for p in pubs if p]  # case reports etc. from the same PubMed search
@@ -148,7 +188,7 @@ async def evaluate_pair(drug_a: str, drug_b: str,
             a, b, s, Grade.C,
             (_citations_from(s.get("cited", []), pubs, "pubmed")
              + _citations_from(s.get("cited", []), web, "web")),
-            "web")
+            "web", pool=weak_pool)
 
     # ---- Nothing found -----------------------------------------------------
     return PairResult(
