@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import httpx
 
+from ..agent import tools
 from ..config import get_settings
 from ..models import Category, Citation, Grade, NormalizedDrug, PairResult
 
@@ -66,11 +67,17 @@ async def check_known_pairs(
     if cuis:
         async with httpx.AsyncClient() as client:
             try:
-                r = await client.get(RXNAV_INTERACTION, params={"rxcuis": " ".join(cuis)},
-                                     timeout=settings.http_timeout)
-                r.raise_for_status()
-                data = r.json()
-            except httpx.HTTPError:
+                r = await tools.request_with_retry(
+                    client, "GET", RXNAV_INTERACTION,
+                    tool="rxnav",
+                    params={"rxcuis": " ".join(cuis)},
+                    timeout=settings.http_timeout)
+                if r.status_code == 404:
+                    data = {}
+                else:
+                    tools._raise_http(r, "rxnav")
+                    data = r.json()
+            except (httpx.HTTPError, tools.ToolRateLimit):
                 data = {}
 
         for group in data.get("fullInteractionTypeGroup", []):

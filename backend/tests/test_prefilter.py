@@ -53,6 +53,8 @@ def _patch_rxnav(monkeypatch, payload: dict, captured: dict) -> None:
             captured["url"] = url
 
             class Resp:
+                status_code = 200
+
                 def raise_for_status(self):
                     return None
 

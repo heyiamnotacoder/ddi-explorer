@@ -190,10 +190,18 @@ Per unresolved pair, stop at the first tier that returns records:
 
 | Step | Tool | Grade if interaction |
 |---|---|---|
-| 1 | `openfda_label_check` | A |
+| 1 | `openfda_label_check` (DI / CI / boxed warning; window around partner) | A |
 | 2 | PubMed eutils + ClinicalTrials.gov (RCT / **human PK** / meta / systematic review) | B |
 | 3 | leftover case reports + Firecrawl **fetched** pages | C |
 | 4 | nothing | no DDI (`grade=null`, `category=none`) |
+
+`openfda_label_check` searches `drug_interactions`, `contraindications`, and
+`boxed_warning`. The snippet is a window around the partner mention, not the
+first 3000 characters (highlights TOC). INN/USAN aliases: rifampicin/rifampin,
+paracetamol/acetaminophen, amoxycillin/amoxicillin; isosorbide* also matches
+`nitrate`/`nitrates`. Citation id is `set_id` or `openfda.spl_set_id`, stored
+as `setid`. No partner/alias in the window → not a hit; the waterfall continues
+to PubMed.
 
 Hard rules (also in the synthesizer prompt):
 
@@ -208,8 +216,9 @@ Hard rules (also in the synthesizer prompt):
 - Patient context present → `patient_specific_note`. Absent → `severe_if[]`.
 
 Pairs run with `PAIR_CONCURRENCY` (default 5). One pair failing must not fail
-the whole request (`source_tier="error"`). A tool HTTP 429 is that pair’s
-error, not “no DDI”, and does not abort other pairs. Identical component
+the whole request (`source_tier="error"`). A tool HTTP 429 is retried twice
+with short backoff; if it still fails it is that pair’s error, not “no DDI”,
+and does not abort other pairs. 404 is not retried. Identical component
 pairs reuse a process-local cache (`agent/pair_cache.py`); hits keep the
 same grade. The cache stores graded pair fields only — never patient notes,
 raw Rx text, or error-tier rows.
