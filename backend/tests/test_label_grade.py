@@ -82,6 +82,31 @@ async def test_unscoped_contraindicat_is_not_a_banner(monkeypatch):
     assert result.category == Category.INTERACTION
 
 
+def _stub_empty_downstream(monkeypatch):
+    async def empty(*_a, **_k):
+        return []
+
+    monkeypatch.setattr("app.agent.waterfall.tools.pubmed_search", empty)
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.clinicaltrials_search", empty)
+    monkeypatch.setattr("app.agent.waterfall.tools.web_search", empty)
+
+
+def _combo_rec(setid: str, a: str, b: str, *, ingredients: list[str],
+               di: str, ci: str) -> dict:
+    return {
+        "setid": setid,
+        "subject_drug": a,
+        "title": f"{setid} labeling",
+        "url": f"https://dailymed/{setid}",
+        "ingredient_names": ingredients,
+        "interactions_text": f"{di} {ci}".strip(),
+        "di_text": di,
+        "ci_text": ci,
+        "label_contraindicated": False,
+    }
+
+
 @pytest.mark.asyncio
 async def test_janumet_colist_is_not_grade_a(monkeypatch):
     pubmed_n = {"n": 0}
@@ -124,6 +149,182 @@ async def test_janumet_colist_is_not_grade_a(monkeypatch):
     assert pubmed_n["n"] == 1
     assert result.grade is None
     assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_janumet_insulin_di_is_not_grade_a(monkeypatch):
+    _stub_empty_downstream(monkeypatch)
+
+    async def fake_fda(a, b):
+        return [_combo_rec(
+            "janumet", a, b,
+            ingredients=["sitagliptin and metformin hydrochloride"],
+            di=(
+                f"JANUMET contains sitagliptin and metformin. "
+                "Concomitant insulin increases hypoglycemia risk. "
+                "CYP3A4 inhibitors may increase sitagliptin exposure."
+            ),
+            ci="Contraindications: severe renal impairment.",
+        )]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("sitagliptin", "metformin")
+    assert result.grade is None
+    assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_synjardy_combo_spl_is_not_grade_a(monkeypatch):
+    _stub_empty_downstream(monkeypatch)
+
+    async def fake_fda(a, b):
+        return [_combo_rec(
+            "synjardy", a, b,
+            ingredients=["empagliflozin and metformin hydrochloride"],
+            di=(
+                "SYNJARDY contains empagliflozin and metformin. "
+                "Concomitant insulin increases hypoglycemia. "
+                "Diuretics may increase volume depletion risk."
+            ),
+            ci="Contraindicated in severe renal impairment.",
+        )]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("empagliflozin", "metformin")
+    assert result.grade is None
+    assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.parametrize("a,b,setid,ingredients,ci", [
+    (
+        "telmisartan", "hydrochlorothiazide", "micardis-hct",
+        ["telmisartan and hydrochlorothiazide"],
+        "Do not use MICARDIS HCT in patients with hypersensitivity to telmisartan.",
+    ),
+    (
+        "amlodipine", "telmisartan", "twynsta",
+        ["amlodipine and telmisartan"],
+        "Do not use Twynsta in patients with hypersensitivity to telmisartan or amlodipine.",
+    ),
+    (
+        "budesonide", "formoterol", "symbicort",
+        ["budesonide and formoterol fumarate"],
+        "SYMBICORT is contraindicated in patients with hypersensitivity to formoterol.",
+    ),
+    (
+        "amlodipine", "atorvastatin", "caduet",
+        ["amlodipine besylate and atorvastatin calcium"],
+        "Do not use Caduet in patients with hypersensitivity to amlodipine or atorvastatin.",
+    ),
+])
+@pytest.mark.asyncio
+async def test_combo_product_ci_is_not_grade_a(
+        monkeypatch, a, b, setid, ingredients, ci):
+    _stub_empty_downstream(monkeypatch)
+
+    async def fake_fda(_a, _b):
+        return [_combo_rec(
+            setid, a, b,
+            ingredients=ingredients,
+            di=(
+                f"This product contains {a} and {b}. "
+                "Concomitant lithium or CYP3A4 inhibitors may interact."
+            ),
+            ci=ci,
+        )]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair(a, b)
+    assert result.grade is None
+    assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_third_drug_combo_spl_is_not_grade_a(monkeypatch):
+    """Twynsta negative PK list naming HCTZ is not a telmisartan–HCTZ DDI."""
+    _stub_empty_downstream(monkeypatch)
+
+    async def fake_fda(_a, _b):
+        return [_combo_rec(
+            "twynsta-hctz", "telmisartan", "hydrochlorothiazide",
+            ingredients=["TELMISARTAN AND AMLODIPINE", "AMLODIPINE BESYLATE"],
+            di=(
+                "Co-administration of telmisartan did not result in a clinically "
+                "significant interaction with acetaminophen, amlodipine, "
+                "glyburide, simvastatin, hydrochlorothiazide, warfarin, or "
+                "ibuprofen."
+            ),
+            ci="Hypersensitivity to telmisartan or amlodipine.",
+        )]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("telmisartan", "hydrochlorothiazide")
+    assert result.grade is None
+    assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_aspirin_ramipril_is_grade_a_not_contraindicated(monkeypatch):
+    async def fake_fda(a, b):
+        return [{
+            "setid": "altace-asa",
+            "subject_drug": "ramipril",
+            "title": "ramipril labeling",
+            "url": "https://dailymed/ramipril",
+            "ingredient_names": ["ramipril"],
+            "interactions_text": (
+                "NSAIDs including aspirin may diminish the antihypertensive "
+                "effect of ramipril and increase the risk of renal impairment."
+            ),
+            "di_text": (
+                "NSAIDs including aspirin may diminish the antihypertensive "
+                "effect of ramipril and increase the risk of renal impairment."
+            ),
+            "ci_text": (
+                "Contraindicated in pregnancy and in patients with a history "
+                "of angioedema."
+            ),
+            "label_contraindicated": False,
+        }]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("aspirin", "ramipril")
+    assert result.grade == Grade.A
+    assert result.category == Category.INTERACTION
+    assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_pde5_nitrate_do_not_use_with_still_banners(monkeypatch):
+    async def fake_fda(a, b):
+        return [{
+            "setid": "viagra-nitrate",
+            "subject_drug": "sildenafil",
+            "title": "sildenafil labeling",
+            "url": "https://dailymed/sild",
+            "ingredient_names": ["sildenafil"],
+            "interactions_text": (
+                "VIAGRA is contraindicated in patients using organic nitrates. "
+                "Do not use with nitrates."
+            ),
+            "di_text": None,
+            "ci_text": (
+                "VIAGRA is contraindicated in patients using organic nitrates. "
+                "Do not use with nitrates."
+            ),
+            "label_contraindicated": True,
+        }]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("sildenafil", "isosorbide mononitrate")
+    assert result.grade == Grade.A
+    assert result.category == Category.CONTRAINDICATED
 
 
 @pytest.mark.asyncio

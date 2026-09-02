@@ -99,6 +99,67 @@ def test_contraindications_field_is_a_hit():
     assert hit["label_contraindicated"] is True
 
 
+def test_twynsta_negative_hctz_mention_is_not_a_hit():
+    rec = {
+        "set_id": "twynsta-hctz-mention",
+        "openfda": {
+            "generic_name": ["TELMISARTAN AND AMLODIPINE"],
+            "substance_name": ["TELMISARTAN", "AMLODIPINE BESYLATE"],
+        },
+        "drug_interactions": [
+            "Co-administration of telmisartan did not result in a clinically "
+            "significant interaction with acetaminophen, amlodipine, glyburide, "
+            "simvastatin, hydrochlorothiazide, warfarin, or ibuprofen."
+        ],
+    }
+    assert not tools._spl_contains_both_pair_members(
+        tools._ingredient_names_from(rec), "telmisartan", "hydrochlorothiazide")
+    assert tools._label_hit(
+        rec, "telmisartan", tools._label_aliases("hydrochlorothiazide"),
+        partner="hydrochlorothiazide") is None
+
+
+def test_combo_spl_generic_name_is_not_a_hit():
+    rec = {
+        "set_id": "janumet-combo",
+        "openfda": {
+            "generic_name": ["sitagliptin and metformin hydrochloride"],
+            "substance_name": ["SITAGLIPTIN", "METFORMIN HYDROCHLORIDE"],
+        },
+        "drug_interactions": [
+            "JANUMET contains sitagliptin and metformin. "
+            "Concomitant insulin increases hypoglycemia risk."
+        ],
+        "contraindications": [
+            "Hypersensitivity to sitagliptin. Do not use sitagliptin if allergic."
+        ],
+    }
+    assert tools._spl_contains_both_pair_members(
+        tools._ingredient_names_from(rec), "metformin", "sitagliptin")
+    assert tools._label_hit(
+        rec, "metformin", tools._label_aliases("sitagliptin"),
+        partner="sitagliptin") is None
+
+
+def test_hypersensitivity_do_not_use_is_not_pair_scoped_ci():
+    text = (
+        "Do not use MICARDIS HCT in patients with known hypersensitivity "
+        "to telmisartan or hydrochlorothiazide."
+    )
+    assert not tools._pair_scoped_contraindication(
+        text, tools._label_aliases("telmisartan"))
+    assert tools._pair_scoped_contraindication(
+        "Do not use with nitrates.",
+        tools._label_aliases("isosorbide mononitrate"))
+    assert tools._pair_scoped_contraindication(
+        "Do not use with organic nitrates in any form.",
+        tools._label_aliases("isosorbide mononitrate"))
+    assert tools._pair_scoped_contraindication(
+        "ZOLOFT is contraindicated with MAOIs including phenelzine. "
+        "Do not use with phenelzine.",
+        tools._label_aliases("phenelzine"))
+
+
 def test_unrelated_ci_blob_is_not_pair_scoped():
     rec = {
         "set_id": "janumet-1",

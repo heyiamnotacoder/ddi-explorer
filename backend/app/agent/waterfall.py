@@ -282,6 +282,9 @@ def _label_role(rec: dict, a: str, b: str) -> str | None:
     """Map one label hit to contraindicated, interaction, or drop (fall through)."""
     if not rec.get("setid"):
         return None
+    names = tools._ingredient_names_from(rec)
+    if tools._spl_contains_both_pair_members(names, a, b):
+        return None
     di = rec.get("di_text")
     ci = rec.get("ci_text")
     blob = rec.get("interactions_text") or ""
@@ -297,6 +300,8 @@ def _label_role(rec: dict, a: str, b: str) -> str | None:
         return "contraindicated"
     if not di or not _label_text_mentions_pair(di, a, b):
         return None
+    if tools._negative_pair_mention(di, aliases):
+        return None
     if tools._is_ingredient_colist(di, aliases) and not tools._has_interaction_language(di):
         return None
     return "interaction"
@@ -305,9 +310,13 @@ def _label_role(rec: dict, a: str, b: str) -> str | None:
 def _pair_from_labels(a: str, b: str, fda: list[dict]) -> PairResult | None:
     """Grade A from a pair-scoped label hit. No synthesizer.
 
-    Drug-interactions windows grade interaction unless they are ingredient
-    co-lists without interaction language. CI/boxed (or DI) grades
-    contraindicated only with pair-scoped wording. Unusable hits fall through.
+    Combo SPLs whose ingredients already include both pair members are
+    dropped. A 'no clinically significant interaction with {partner}'
+    sentence is not Grade A. Drug-interactions windows grade interaction
+    unless they are
+    ingredient co-lists without interaction language. CI/boxed (or DI)
+    grades contraindicated only with with/concomitant/coadminister +
+    partner. Unusable hits fall through.
     """
     usable: list[dict] = []
     contra = False
