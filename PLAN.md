@@ -96,7 +96,7 @@ For each unresolved pair (Drug A, Drug B):
 
 ```
 1. openfda_label_check ──pair-scoped DI interaction or CI-with-partner──▶ Grade A, no synthesizer → DONE, stop
-        │ co-list / unscoped CI substring / no partner mention / empty window
+        │ combo SPL of both pair members / negative 'no interaction with' / co-list / unscoped CI / no partner mention / empty window
 2. pubmed_search + clinicaltrials_search (RCT/PK/meta)
         │ ──supports DDI──▶ Grade B → DONE, stop
         │ ──negative/absent + no case reports──▶ none / insufficient

@@ -247,6 +247,102 @@ def _has_interaction_language(text: str) -> bool:
     return bool(_INTERACTION_RE.search(text or ""))
 
 
+def _any_alias_in_blob(aliases: list[str], blob: str) -> bool:
+    low = blob or ""
+    for alias in aliases:
+        if alias and _alias_pattern(alias).search(low):
+            return True
+    return False
+
+
+def _ingredient_names_from(rec: dict) -> list[str]:
+    """Product ingredients: attached list, or openFDA generic/substance names."""
+    attached = rec.get("ingredient_names")
+    if attached:
+        return [str(x) for x in attached if x]
+    openfda = rec.get("openfda") or {}
+    out: list[str] = []
+    for key in ("generic_name", "substance_name"):
+        val = openfda.get(key) or []
+        if isinstance(val, str):
+            val = [val] if val.strip() else []
+        out.extend(str(x) for x in val if x)
+    return out
+
+
+def _spl_contains_both_pair_members(
+    ingredient_names: list[str] | None, drug_a: str, drug_b: str,
+) -> bool:
+    """True when this SPL already lists both pair members as ingredients."""
+    names = [str(n) for n in (ingredient_names or []) if n]
+    if not names:
+        return False
+    blob = " ".join(names).lower()
+    return (
+        _any_alias_in_blob(_label_aliases(drug_a), blob)
+        and _any_alias_in_blob(_label_aliases(drug_b), blob)
+    )
+
+
+# Trailing salt/ester words; not drug names (do not include nitrate).
+_SALT_SUFFIXES = frozenset({
+    "hydrochloride", "hcl", "besylate", "besilate", "fumarate", "maleate",
+    "succinate", "mesylate", "tartrate", "citrate", "sulfate", "sulphate",
+    "phosphate", "acetate", "sodium", "potassium", "calcium", "bromide",
+    "hydrobromide", "chloride", "pamoate", "embonate", "dipropionate",
+    "valerate", "propionate", "dihydrate", "monohydrate", "anhydrous",
+    "hydrate",
+})
+
+
+def _active_moieties(ingredient_names: list[str] | None) -> list[str]:
+    """Distinct active ingredients, salts stripped, split on and/;/,/."""
+    parts: list[str] = []
+    for raw in ingredient_names or []:
+        text = str(raw).lower()
+        for sep in (" and ", ";", "/", ","):
+            text = text.replace(sep, "|")
+        for piece in text.split("|"):
+            words = piece.split()
+            while words and words[-1] in _SALT_SUFFIXES:
+                words.pop()
+            tok = " ".join(words).strip()
+            if tok and tok not in parts:
+                parts.append(tok)
+    return parts
+
+
+def _is_combination_spl(ingredient_names: list[str] | None) -> bool:
+    """True when this product has two or more active ingredients."""
+    return len(_active_moieties(ingredient_names)) >= 2
+
+
+_NEGATIVE_INTERACTION_RE = re.compile(
+    r"(?:did not|does not|do not|no(?:t)?)\s+"
+    r"(?:result in\s+|cause\s+|show\s+|produce\s+|demonstrate\s+)?"
+    r"(?:a\s+)?(?:clinically\s+)?(?:significant\s+)?interaction",
+    re.I,
+)
+
+
+def _negative_pair_mention(text: str, aliases: list[str]) -> bool:
+    """True when the partner is named in a 'no significant interaction' sentence."""
+    low = " ".join((text or "").lower().split())
+    if not low:
+        return False
+    idx = _first_mention(low, aliases)
+    if idx is None:
+        return False
+    start = low.rfind(".", 0, idx) + 1
+    end = low.find(".", idx)
+    if end < 0:
+        end = len(low)
+    sent = low[start:end]
+    if not _any_alias_in_blob(aliases, sent):
+        return False
+    return bool(_NEGATIVE_INTERACTION_RE.search(sent))
+
+
 def _is_ingredient_colist(text: str, aliases: list[str]) -> bool:
     """True when the partner is named as an ingredient of this product, not a DDI."""
     low = " ".join((text or "").lower().split())
@@ -270,29 +366,41 @@ def _is_ingredient_colist(text: str, aliases: list[str]) -> bool:
     return False
 
 
-def _pair_scoped_contraindication(text: str, aliases: list[str]) -> bool:
-    """CI language that names the partner as the interacting drug.
+# Class/article words allowed between "with" and the partner ("organic nitrates").
+# Not "hypersensitivity" / "allergy" — those are product-ingredient CI, not a DDI.
+_CI_WITH_MOD = (
+    r"(?:organic|any|other|the|a|an|concomitant|strong|potent|"
+    r"oral|parenteral|systemic|inhaled|topical|all)\s+"
+)
 
-    A product CI section that merely contains the word contraindicated while
-    listing a co-ingredient is not enough.
+
+def _pair_scoped_contraindication(text: str, aliases: list[str]) -> bool:
+    """CI only when the partner is named with with / concomitant / coadminister.
+
+    'Do not use … telmisartan' in a hypersensitivity sentence is not CI.
     """
     low = " ".join((text or "").lower().split())
     if not low:
         return False
+    mod = _CI_WITH_MOD
     for alias in aliases:
         if not alias:
             continue
         a = re.escape(alias.lower())
+        with_a = rf"with\s+(?:{mod}){{0,3}}{a}"
         pats = (
-            rf"contraindicat\w*(?:\s+\w+){{0,8}}\s+(?:in\s+combination\s+)?with\s+{a}",
+            rf"contraindicat\w*(?:\s+\w+){{0,8}}\s+(?:in\s+combination\s+)?{with_a}",
             rf"contraindicat\w*(?:\s+\w+){{0,8}}\s+"
-            rf"(?:taking|receiving|using|on|treated with)\s+(?:\w+\s+){{0,3}}{a}",
-            rf"concomitant(?:\s+\w+){{0,6}}\s+{a}\b[^.]{{0,80}}contraindicat",
-            rf"\b{a}\b(?:\s+\w+){{0,8}}\s+(?:is|are)\s+contraindicat",
-            rf"do\s+not\s+(?:co-?administer|use|give|take|combine)"
-            rf"(?:\s+\w+){{0,8}}\s+(?:with\s+)?{a}",
+            rf"(?:taking|receiving|using|on|treated with)\s+(?:{mod}){{0,3}}{a}",
+            rf"concomitant(?:\s+\w+){{0,6}}\s+(?:{mod}){{0,3}}{a}\b[^.]{{0,80}}"
+            rf"contraindicat",
+            rf"concomitant(?:\s+\w+){{0,6}}\s+contraindicat\w*[^.]{{0,80}}\b{a}\b",
+            rf"do\s+not\s+(?:use|give|take|combine)(?:\s+\w+){{0,6}}\s+{with_a}",
+            rf"do\s+not\s+co-?administer(?:\s+\w+){{0,6}}\s+(?:{with_a}|{a})",
             rf"(?:must|should)\s+not\s+be\s+"
-            rf"(?:used|given|co-?administered|taken)\s+with\s+(?:\w+\s+){{0,3}}{a}",
+            rf"(?:used|given|taken|combined|co-?administered)\s+{with_a}",
+            rf"co-?administ\w*(?:\s+\w+){{0,6}}\s+(?:{with_a}|{a})\b[^.]{{0,80}}"
+            rf"contraindicat",
         )
         if any(re.search(p, low) for p in pats):
             return True
@@ -310,11 +418,18 @@ def _field_query(aliases: list[str], fields: tuple[str, ...]) -> str:
 
 
 def _label_hit(rec: dict, subject: str, aliases: list[str],
+               partner: str | None = None,
                _fields: tuple[str, ...] = LABEL_SEARCH_FIELDS) -> dict | None:
-    """Window DI and CI/boxed separately. CI flag is pair-scoped, not substring."""
+    """Window DI and CI/boxed separately. Combo SPLs of both pair drugs are not hits."""
+    other = partner or (aliases[0] if aliases else "")
+    ingredients = _ingredient_names_from(rec)
+    if other and _spl_contains_both_pair_members(ingredients, subject, other):
+        return None
     di = _window_around(_join_fields(rec, ("drug_interactions",)), aliases)
     ci = _window_around(
         _join_fields(rec, ("contraindications", "boxed_warning")), aliases)
+    if di and _negative_pair_mention(di, aliases):
+        di = None
     if not di and not ci:
         return None
     contra = _pair_scoped_contraindication(
@@ -333,6 +448,7 @@ def _label_hit(rec: dict, subject: str, aliases: list[str],
         "setid": setid,
         "url": _dailymed_url(setid, subject),
         "label_contraindicated": contra,
+        "ingredient_names": ingredients,
     }
 
 
@@ -371,7 +487,7 @@ async def openfda_label_check(drug_a: str, drug_b: str) -> list[dict]:
                     continue
                 _raise_http(r, "openfda")
                 for rec in r.json().get("results", []):
-                    row = _label_hit(rec, subject, aliases)
+                    row = _label_hit(rec, subject, aliases, partner=other)
                     if not row:
                         continue
                     key = str(row.get("setid") or row.get("url") or "")
