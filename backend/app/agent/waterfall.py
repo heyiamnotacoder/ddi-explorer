@@ -1,6 +1,6 @@
 """The single linear agent: per-pair evidence waterfall with early exit.
 
-  1. openFDA labels      -> partner named in snippet -> Grade A, no LLM, STOP
+  1. openFDA labels      -> pair-scoped DI / CI hit -> Grade A, no LLM, STOP
   2. PubMed + CT.gov     -> human RCT/PK/meta that support a DDI -> Grade B, STOP
                             (case reports withheld; negative/absent strong
                             evidence falls through to tier 3)
@@ -269,16 +269,55 @@ def _label_text_mentions_pair(text: str, a: str, b: str) -> bool:
     return tools._first_mention(text or "", aliases) is not None
 
 
+def _partner_aliases_for_rec(rec: dict, a: str, b: str) -> list[str]:
+    subject = (rec.get("subject_drug") or "").strip().lower()
+    if subject == a.lower():
+        return tools._label_aliases(b)
+    if subject == b.lower():
+        return tools._label_aliases(a)
+    return tools._label_aliases(a) + tools._label_aliases(b)
+
+
+def _label_role(rec: dict, a: str, b: str) -> str | None:
+    """Map one label hit to contraindicated, interaction, or drop (fall through)."""
+    if not rec.get("setid"):
+        return None
+    di = rec.get("di_text")
+    ci = rec.get("ci_text")
+    blob = rec.get("interactions_text") or ""
+    if di is None and ci is None:
+        di = blob or None
+        ci = blob or None
+    mention = " ".join(x for x in (di, ci, blob) if x)
+    if not _label_text_mentions_pair(mention, a, b):
+        return None
+    aliases = _partner_aliases_for_rec(rec, a, b)
+    if tools._pair_scoped_contraindication(ci or "", aliases) or (
+            tools._pair_scoped_contraindication(di or "", aliases)):
+        return "contraindicated"
+    if not di or not _label_text_mentions_pair(di, a, b):
+        return None
+    if tools._is_ingredient_colist(di, aliases) and not tools._has_interaction_language(di):
+        return None
+    return "interaction"
+
+
 def _pair_from_labels(a: str, b: str, fda: list[dict]) -> PairResult | None:
-    """Grade A from a partner mention on a retrieved label. No synthesizer."""
+    """Grade A from a pair-scoped label hit. No synthesizer.
+
+    Drug-interactions windows grade interaction unless they are ingredient
+    co-lists without interaction language. CI/boxed (or DI) grades
+    contraindicated only with pair-scoped wording. Unusable hits fall through.
+    """
     usable: list[dict] = []
+    contra = False
     for rec in fda:
-        blob = rec.get("interactions_text") or ""
-        if not _label_text_mentions_pair(blob, a, b):
-            continue
-        if not rec.get("setid"):
+        role = _label_role(rec, a, b)
+        if role is None:
             continue
         usable.append(rec)
+        if role == "contraindicated":
+            contra = True
     if not usable:
         return None
     cites = _citations_from(
@@ -286,8 +325,6 @@ def _pair_from_labels(a: str, b: str, fda: list[dict]) -> PairResult | None:
     if not cites:
         return None
     blob = " ".join(rec.get("interactions_text") or "" for rec in usable)
-    contra = any(rec.get("label_contraindicated") for rec in usable) or (
-        "contraindicat" in blob.lower())
     cat = Category.CONTRAINDICATED if contra else Category.INTERACTION
     return PairResult(
         drugs=(a, b),

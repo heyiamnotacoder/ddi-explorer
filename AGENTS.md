@@ -198,14 +198,24 @@ Per unresolved pair, stop at the first tier that returns records:
 
 `openfda_label_check` searches `drug_interactions`, `contraindications`, and
 `boxed_warning`. The snippet is a window around the partner mention, not the
-first 3000 characters (highlights TOC). INN/USAN aliases: rifampicin/rifampin,
+first 3000 characters (highlights TOC). DI and CI/boxed are windowed
+separately. INN/USAN aliases: rifampicin/rifampin,
 paracetamol/acetaminophen, amoxycillin/amoxicillin; isosorbide* also matches
 `nitrate`/`nitrates`. Citation id is `set_id` or `openfda.spl_set_id`, stored
 as `setid`. No partner/alias in the window → not a hit; the waterfall continues
-to PubMed. A partner mention with a mapped `setid` is Grade A with **no
-synthesizer**; `contraindicat` in that snippet/CI/boxed warning sets
-`category=contraindicated` (banner). Overlay then fills dose/timing/patient
-notes the same way as RxNav local hits.
+to PubMed. A mapped `setid` is Grade A with **no synthesizer** only when:
+
+- **interaction:** partner is in a `drug_interactions` window that is not an
+  ingredient co-list (`contains X`, `X/Y combination`, `this product contains`)
+  without interaction language;
+- **contraindicated (banner):** pair-scoped wording — contraindicated **with**
+  `{partner}`, concomitant `{partner}` is contraindicated, do not coadminister
+  `{partner}`. A product CI section that merely contains the substring
+  `contraindicat` while naming a co-ingredient is not a banner.
+
+Overlay then fills dose/timing/patient notes the same way as RxNav local hits.
+It may set `category=timing` on a Grade A interaction (e.g. levothyroxine +
+cations). It never promotes to contraindicated and never clears a true CI.
 
 Hard rules (also in the synthesizer prompt):
 
@@ -379,6 +389,10 @@ citations never earn a grade; invented PMIDs never appear.
 
 `backend/tests/test_waterfall_grades.py` — human PK grades B; case report vs
 negative trial is C with `evidence_conflict`; unfetched URLs are not citations.
+
+`backend/tests/test_label_grade.py` — pair-scoped openFDA Grade A; Janumet-style
+co-lists are not Grade A; PDE-5/nitrate and MAOI/SSRI still banner; levothyroxine
++ calcium overlays to timing, not a banner.
 
 `backend/tests/test_overlay.py` — local/openFDA Grade A pairs get timing / missing-dose
 copy / patient notes without a synthesizer call; extract dose and schedule

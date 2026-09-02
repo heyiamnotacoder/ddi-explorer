@@ -96,6 +96,39 @@ def test_contraindications_field_is_a_hit():
         rec, "sildenafil", tools._label_aliases("isosorbide mononitrate"))
     assert hit is not None
     assert "nitrate" in hit["interactions_text"].lower()
+    assert hit["label_contraindicated"] is True
+
+
+def test_unrelated_ci_blob_is_not_pair_scoped():
+    rec = {
+        "set_id": "janumet-1",
+        "drug_interactions": [
+            "JANUMET contains sitagliptin and metformin. This product contains sitagliptin."
+        ],
+        "contraindications": [
+            "JANUMET is contraindicated in patients with severe renal impairment."
+        ],
+    }
+    hit = tools._label_hit(
+        rec, "metformin", tools._label_aliases("sitagliptin"))
+    assert hit is not None
+    assert hit["label_contraindicated"] is False
+    assert tools._is_ingredient_colist(
+        hit["di_text"] or "", tools._label_aliases("sitagliptin"))
+
+
+def test_pair_scoped_ci_on_pde5_nitrate():
+    rec = {
+        "set_id": "viagra-1",
+        "contraindications": [
+            "VIAGRA is contraindicated in patients using organic nitrates. "
+            "Do not use with nitrates."
+        ],
+    }
+    hit = tools._label_hit(
+        rec, "sildenafil", tools._label_aliases("isosorbide mononitrate"))
+    assert hit is not None
+    assert hit["label_contraindicated"] is True
 
 
 def test_inn_usan_spelling_aliases():
