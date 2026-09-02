@@ -233,6 +233,72 @@ def _window_around(text: str, aliases: list[str],
     return blob[start:end]
 
 
+_INTERACTION_RE = re.compile(
+    r"\b(?:drug[- ]drug|interact(?:ion|s|ing)?|concomitant|co-?administ\w*|"
+    r"exposure|auc|cmax|cyp\d*|p-?gp|clearance|metabolis\w*|"
+    r"increas\w+|decreas\w+|reduc\w+|avoid|monitor|caution|"
+    r"potentiat\w+|prolong\w+|myopath\w+|rhabdo\w*|bleed\w*|"
+    r"absorption|chelat\w*|separate|stagger)\b",
+    re.I,
+)
+
+
+def _has_interaction_language(text: str) -> bool:
+    return bool(_INTERACTION_RE.search(text or ""))
+
+
+def _is_ingredient_colist(text: str, aliases: list[str]) -> bool:
+    """True when the partner is named as an ingredient of this product, not a DDI."""
+    low = " ".join((text or "").lower().split())
+    if not low:
+        return False
+    for alias in aliases:
+        if not alias:
+            continue
+        a = re.escape(alias.lower())
+        pats = (
+            rf"this product contains\s+{a}",
+            rf"(?:each|the)\s+(?:tablet|capsule|film|product)\s+contains\s+[^.]{{0,80}}{a}",
+            rf"contains\s+(?:the\s+active\s+ingredients?\s+)?{a}",
+            rf"combination (?:product\s+)?(?:of|containing)\s+[^.]{{0,60}}{a}",
+            rf"fixed[- ]dose combination[^.]{{0,80}}{a}",
+            rf"{a}\s*/\s*[a-z][a-z0-9\- ]{{2,40}}\s+combination",
+            rf"[a-z][a-z0-9\- ]{{2,40}}\s*/\s*{a}\s+combination",
+        )
+        if any(re.search(p, low) for p in pats):
+            return True
+    return False
+
+
+def _pair_scoped_contraindication(text: str, aliases: list[str]) -> bool:
+    """CI language that names the partner as the interacting drug.
+
+    A product CI section that merely contains the word contraindicated while
+    listing a co-ingredient is not enough.
+    """
+    low = " ".join((text or "").lower().split())
+    if not low:
+        return False
+    for alias in aliases:
+        if not alias:
+            continue
+        a = re.escape(alias.lower())
+        pats = (
+            rf"contraindicat\w*(?:\s+\w+){{0,8}}\s+(?:in\s+combination\s+)?with\s+{a}",
+            rf"contraindicat\w*(?:\s+\w+){{0,8}}\s+"
+            rf"(?:taking|receiving|using|on|treated with)\s+(?:\w+\s+){{0,3}}{a}",
+            rf"concomitant(?:\s+\w+){{0,6}}\s+{a}\b[^.]{{0,80}}contraindicat",
+            rf"\b{a}\b(?:\s+\w+){{0,8}}\s+(?:is|are)\s+contraindicat",
+            rf"do\s+not\s+(?:co-?administer|use|give|take|combine)"
+            rf"(?:\s+\w+){{0,8}}\s+(?:with\s+)?{a}",
+            rf"(?:must|should)\s+not\s+be\s+"
+            rf"(?:used|given|co-?administered|taken)\s+with\s+(?:\w+\s+){{0,3}}{a}",
+        )
+        if any(re.search(p, low) for p in pats):
+            return True
+    return False
+
+
 def _field_query(aliases: list[str], fields: tuple[str, ...]) -> str:
     clauses = [
         f'{field}:"{alias}"'
@@ -244,22 +310,29 @@ def _field_query(aliases: list[str], fields: tuple[str, ...]) -> str:
 
 
 def _label_hit(rec: dict, subject: str, aliases: list[str],
-               fields: tuple[str, ...] = LABEL_SEARCH_FIELDS) -> dict | None:
-    snippet = _window_around(_join_fields(rec, fields), aliases)
-    if not snippet:
+               _fields: tuple[str, ...] = LABEL_SEARCH_FIELDS) -> dict | None:
+    """Window DI and CI/boxed separately. CI flag is pair-scoped, not substring."""
+    di = _window_around(_join_fields(rec, ("drug_interactions",)), aliases)
+    ci = _window_around(
+        _join_fields(rec, ("contraindications", "boxed_warning")), aliases)
+    if not di and not ci:
         return None
+    contra = _pair_scoped_contraindication(
+        ci or "", aliases) or _pair_scoped_contraindication(di or "", aliases)
+    snippet = ci if contra and ci else (di or ci)
     setid = _setid_from_record(rec)
     openfda = rec.get("openfda") or {}
     names = openfda.get("generic_name") or [subject]
     title_name = names[0] if names else subject
-    ci_blob = _join_fields(rec, ("contraindications", "boxed_warning"))
     return {
         "subject_drug": subject,
         "title": f"{title_name} labeling",
         "interactions_text": snippet,
+        "di_text": di,
+        "ci_text": ci,
         "setid": setid,
         "url": _dailymed_url(setid, subject),
-        "label_contraindicated": "contraindicat" in f"{snippet} {ci_blob}".lower(),
+        "label_contraindicated": contra,
     }
 
 

@@ -53,7 +53,8 @@ async def test_partner_mention_is_grade_a_without_synthesizer(monkeypatch):
 async def test_contraindicat_snippet_sets_category(monkeypatch):
     async def fake_fda(a, b):
         return [_fda_rec(
-            a, b, extra="This combination is contraindicated.",
+            a, b,
+            extra=f"Contraindicated with {b}. Do not coadminister {b}.",
         )]
 
     monkeypatch.setattr(
@@ -63,6 +64,134 @@ async def test_contraindicat_snippet_sets_category(monkeypatch):
     assert result.grade == Grade.A
     assert result.category == Category.CONTRAINDICATED
     assert result.severity == "major"
+
+
+@pytest.mark.asyncio
+async def test_unscoped_contraindicat_is_not_a_banner(monkeypatch):
+    async def fake_fda(a, b):
+        return [_fda_rec(
+            a, b,
+            extra="Contraindications: severe renal impairment, metabolic acidosis.",
+        )]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+
+    result = await evaluate_pair("metformin", "sitagliptin")
+    assert result.grade == Grade.A
+    assert result.category == Category.INTERACTION
+
+
+@pytest.mark.asyncio
+async def test_janumet_colist_is_not_grade_a(monkeypatch):
+    pubmed_n = {"n": 0}
+
+    async def fake_fda(a, b):
+        return [{
+            "setid": "janumet",
+            "subject_drug": a,
+            "title": "JANUMET labeling",
+            "url": "https://dailymed/janumet",
+            "interactions_text": (
+                f"JANUMET contains {b} and {a}. This product contains {b}. "
+                "Contraindications: severe renal impairment."
+            ),
+            "di_text": (
+                f"JANUMET contains {b} and {a}. This product contains {b}."
+            ),
+            "ci_text": "Contraindications: severe renal impairment.",
+            "label_contraindicated": True,
+        }]
+
+    async def fake_pubmed(*_a, **_k):
+        pubmed_n["n"] += 1
+        return []
+
+    async def fake_ct(*_a, **_k):
+        return []
+
+    async def fake_web(*_a, **_k):
+        return []
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    monkeypatch.setattr("app.agent.waterfall.tools.pubmed_search", fake_pubmed)
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.clinicaltrials_search", fake_ct)
+    monkeypatch.setattr("app.agent.waterfall.tools.web_search", fake_web)
+
+    result = await evaluate_pair("sitagliptin", "metformin")
+    assert pubmed_n["n"] == 1
+    assert result.grade is None
+    assert result.category != Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_maoi_ssri_pair_scoped_is_contraindicated(monkeypatch):
+    async def fake_fda(a, b):
+        return [{
+            "setid": "zoloft-maoi",
+            "subject_drug": "fluoxetine",
+            "title": "fluoxetine labeling",
+            "url": "https://dailymed/fluox",
+            "interactions_text": (
+                "ZOLOFT is contraindicated with MAOIs including phenelzine. "
+                "Do not use with phenelzine."
+            ),
+            "di_text": None,
+            "ci_text": (
+                "ZOLOFT is contraindicated with MAOIs including phenelzine. "
+                "Do not use with phenelzine."
+            ),
+            "label_contraindicated": True,
+        }]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("phenelzine", "fluoxetine")
+    assert result.grade == Grade.A
+    assert result.category == Category.CONTRAINDICATED
+
+
+@pytest.mark.asyncio
+async def test_levothyroxine_calcium_label_is_timing_not_banner(monkeypatch):
+    async def fake_fda(a, b):
+        return [{
+            "setid": "synthroid-ca",
+            "subject_drug": "levothyroxine",
+            "title": "levothyroxine labeling",
+            "url": "https://dailymed/lt4",
+            "interactions_text": (
+                "Calcium supplements may decrease the absorption of levothyroxine. "
+                "Separate administration by 4 hours."
+            ),
+            "di_text": (
+                "Calcium supplements may decrease the absorption of levothyroxine. "
+                "Separate administration by 4 hours."
+            ),
+            "ci_text": "Contraindicated in uncorrected adrenal insufficiency.",
+            "label_contraindicated": True,
+        }]
+
+    monkeypatch.setattr(
+        "app.agent.waterfall.tools.openfda_label_check", fake_fda)
+    result = await evaluate_pair("levothyroxine", "calcium")
+    assert result.grade == Grade.A
+    assert result.category == Category.INTERACTION
+    out = apply(
+        [result],
+        drugs=[
+            NormalizedDrug(
+                input_name="levothyroxine", generic_name="levothyroxine",
+                components=["levothyroxine"], schedule="1-0-0"),
+            NormalizedDrug(
+                input_name="calcium", generic_name="calcium",
+                components=["calcium"], schedule="0-0-1"),
+        ],
+        patient_ctx=None,
+    )
+    assert out[0].category == Category.TIMING
+    assert out[0].grade == Grade.A
 
 
 @pytest.mark.asyncio

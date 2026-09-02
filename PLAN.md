@@ -85,7 +85,7 @@ transcription-only and is allowed to see the raw image in v1.
 **Rules:**
 - **Citation-required:** a claim with no retrievable citation is *refused*, never graded (anti-hallucination guardrail).
 - **Conflict rule (locked):** positive case report + negative/absent RCT evidence → **Grade C**, with the conflict disclosed.
-- **Contraindicated pairs** (any grade) → red banner above all results, never buried.
+- **Contraindicated pairs** (any grade) → large caution banner (hazard yellow + deep red) above all results, never buried. Not the same treatment as unresolved warnings, avoid-with, or Grade C.
 - **Insufficient evidence** (new/novel drug, nothing retrievable) → distinct tag/screen, honest "insufficient evidence" — never silent extrapolation.
 
 ---
@@ -95,8 +95,8 @@ transcription-only and is allowed to see the raw image in v1.
 For each unresolved pair (Drug A, Drug B):
 
 ```
-1. openfda_label_check ──usable partner snippet (DI/CI/boxed; aliases)──▶ Grade A, no synthesizer → DONE, stop
-        │ no partner mention / empty window
+1. openfda_label_check ──pair-scoped DI interaction or CI-with-partner──▶ Grade A, no synthesizer → DONE, stop
+        │ co-list / unscoped CI substring / no partner mention / empty window
 2. pubmed_search + clinicaltrials_search (RCT/PK/meta)
         │ ──supports DDI──▶ Grade B → DONE, stop
         │ ──negative/absent + no case reports──▶ none / insufficient

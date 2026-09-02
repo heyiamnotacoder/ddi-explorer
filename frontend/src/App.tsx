@@ -72,7 +72,13 @@ function GradePill({
   sourceTier?: string | null;
 }) {
   if (sourceTier === "insufficient") return <span className="pill insuff">INSUFF</span>;
-  if (category === "contraindicated") return <span className="pill contra">CONTRA</span>;
+  if (category === "contraindicated") {
+    return (
+      <span className="pill contra" title="Contraindicated">
+        <span aria-hidden="true">⚠</span> CONTRA
+      </span>
+    );
+  }
   if (category === "timing") return <span className="pill timing">TIMING</span>;
   if (grade === "A") return <span className="pill A">A</span>;
   if (grade === "B") return <span className="pill B">B</span>;
@@ -546,6 +552,35 @@ export default function App() {
 
       {result && (
         <div className="results">
+          {result.contraindicated_banner.length > 0 && (
+            <div className="ci-banner" role="alert">
+              <div className="ci-banner-stripe" aria-hidden="true" />
+              <div className="ci-banner-body">
+                <svg className="ci-banner-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2.2 22.8 21.5H1.2L12 2.2z" />
+                  <rect x="11" y="9" width="2" height="6.2" rx="0.4" />
+                  <rect x="11" y="16.6" width="2" height="2" rx="0.4" />
+                </svg>
+                <div>
+                  <p className="ci-banner-kicker">Caution — do not co-administer</p>
+                  <h2>Contraindicated combination</h2>
+                  <p className="ci-banner-lead">
+                    {result.contraindicated_banner.length === 1
+                      ? "This pair is labeled contraindicated. Do not start or continue both medicines together unless a specialist has already accepted the risk."
+                      : "These pairs are labeled contraindicated. Do not start or continue both medicines together unless a specialist has already accepted the risk."}
+                  </p>
+                  <ul>
+                    {result.contraindicated_banner.map((p, i) => (
+                      <li key={i}>
+                        <strong>{p.drugs[0]} + {p.drugs[1]}</strong>
+                        {p.summary ? ` — ${p.summary}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
           <section className="panel resolved">
             <div className="resolved-head">
               <h3>Resolved medicines</h3>
@@ -586,15 +621,6 @@ export default function App() {
             )}
             <PairMatrix components={components} pairs={result.pairs} />
           </section>
-
-          {result.contraindicated_banner.length > 0 && (
-            <div className="banner" role="alert">
-              <strong>CONTRAINDICATED</strong>
-              {result.contraindicated_banner.map((p, i) => (
-                <div key={i}>{p.drugs[0]} + {p.drugs[1]} — {p.summary}</div>
-              ))}
-            </div>
-          )}
 
           {result.unresolved_drugs.length > 0 && (
             <div className="warn-box">
