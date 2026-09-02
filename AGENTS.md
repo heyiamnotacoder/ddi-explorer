@@ -35,7 +35,7 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 ├── AGENTS.md                 ← this file
 ├── PLAN.md                   locked design decisions
 ├── README.md                 human quick start
-├── .gitignore                ignores .env, .venv, node_modules
+├── .gitignore                ignores .env, .venv, node_modules, eval/results/
 ├── backend/                  FastAPI app (Python 3.14 venv at repo-root `.venv`)
 │   ├── .env                  LIVE KEYS — never commit
 │   ├── .env.example          placeholders only
@@ -63,13 +63,16 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │       └── web_resolve.py  dataset+RxNav misses via scrubbed web search
 │   ├── scripts/fetch_indian_dataset.py
 │   └── tests/                pytest (offline; no live API keys)
-├── eval/                     THIS BRANCH ONLY: 30 live /api/check cases
-│   ├── cases.json
+├── eval/                     THIS BRANCH ONLY — never merge onto main
+│   ├── cases.json            30 known-pair live /api/check
+│   ├── cases_polypharmacy.json   10×3-drug + 5×4-drug + 5×5-drug interacting
+│   ├── cases_no_contraindication.json  same sizes; must not banner
 │   ├── run_eval.py
-│   └── README.md
+│   ├── README.md
+│   └── results/              gitignored live dumps (keep locally)
 └── frontend/                 React 19 + Vite 8 + TypeScript
     └── src/
-        ├── App.tsx           single-screen UI
+        ├── App.tsx           single-screen UI; sticky caution banner
         ├── api.ts            POST /api/check, /api/alternatives
         └── history.ts        localStorage: scrubbed CheckResponse snapshots
 ```
@@ -319,7 +322,11 @@ Defined in `backend/app/main.py` and `models.py`.
 `keep`, `timing_first`, `disclaimer`.
 
 Frontend: one screen in `frontend/src/App.tsx`. Submit disabled until there is
-text or an image. Results sort contraindicated → A → B → C. A **pair matrix**
+text or an image. If `contraindicated_banner` is non-empty, a sticky
+**Caution — do not co-administer** strip (`.ci-banner`) is the first result
+block: hazard-yellow, caution triangle, pair names. Contraindicated pills and
+pair cards use the same yellow, distinct from tan warn-box / purple avoid-box /
+Grade C red. Results sort contraindicated → A → B → C. A **pair matrix**
 (component × component) sits with the pair cards. Up to five scrubbed checks
 live in `localStorage` (`history.ts`); the clinician can clear them. CORS
 allows `http://localhost:5173` only.
@@ -372,6 +379,9 @@ cd backend && ../.venv/bin/python -m pytest tests/ -q
 # live eval (this branch only; needs backend/.env keys; not default pytest)
 .venv/bin/python eval/run_eval.py --dry-run
 .venv/bin/python eval/run_eval.py
+.venv/bin/python eval/run_eval.py --cases eval/cases_polypharmacy.json
+.venv/bin/python eval/run_eval.py --cases eval/cases_no_contraindication.json \
+  --base-url http://127.0.0.1:8000 --json-out eval/results/noci.json
 
 # optional local OCR
 brew install tesseract
@@ -426,9 +436,29 @@ already-resolved names skip the web.
 keep the grade; patient notes never enter the cache; a tool 429 errors that
 pair only.
 
-When changing scrub, normalize, web resolve, ranking, overlay, or LLM wiring,
-extend these tests. Do not add tests that need live API keys. The ~30-pair **full live
-`/api/check` eval is `eval/run_eval.py` on this branch** (not default pytest).
+When changing scrub, normalize, web resolve, ranking, overlay, label Grade A,
+or LLM wiring, extend these tests. Do not add tests that need live API keys.
+
+### Live eval (this branch only)
+
+`eval/run_eval.py` is **not** pytest and is **not** on `main`. Product bug
+fixes cherry-pick to `main`; case JSON, the runner, and dumps stay here.
+
+| File | What the judge checks |
+|---|---|
+| `eval/cases.json` | 30 known-pair full `/api/check` (anchors: warfarin–aspirin Grade A, MAOI–SSRI banner, screenshot quartet) |
+| `eval/cases_polypharmacy.json` | 20 multi-drug interacting regimens (3/4/5 drugs) |
+| `eval/cases_no_contraindication.json` | 20 common co-prescribed regimens: empty banner, no `category=contraindicated`; licensed combos (`pairs_not_grade_a`); aspirin+ramipril still Grade A **interaction** |
+
+`eval/results/` is gitignored. Do not delete leftover dumps; they are local
+history. Run cases sequentially against a running server (`--base-url`) when
+openFDA 429s show up. Do not treat a 404 as a crash.
+
+After the combo-SPL / pair-scoped-CI work, the no-CI set passed **20/20**
+(empty banners; metformin+sitagliptin and other licensed combos not Grade A;
+aspirin+ramipril Grade A interaction). Do not loosen those expects. Do not
+add a hardcoded FDC skip table or put the synthesizer back on Grade A label
+hits.
 
 Privacy invariant: **no reasoning LLM call on unscrubbed text.** Vision may
 see a raw image in v1; its transcript is still scrubbed. Image-level
@@ -453,9 +483,15 @@ retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 - Comments: short, factual, only for non-obvious constraints (PHI guards,
   brand-as-PERSON, early-exit). No changelog comments.
 - Do not add Markdown files the user did not ask for.
-- Do not commit `.env`, `.venv`, `node_modules`, or `__pycache__`.
+- Do not commit `.env`, `.venv`, `node_modules`, `__pycache__`, or `eval/results/`.
+- Do not merge `eval/` (cases, runner, README) onto `main`. Cherry-pick
+  product/bugfix commits only.
 - Indian dataset is ~14MB JSON; do not regenerate unless the fetch script
   or source data changed.
+- Do not add a hardcoded “never check these FDCs” table. Combo products are
+  ignored when **this SPL’s ingredients already include both pair members**.
+- Do not drop every multi-ingredient SPL: that hides real DDIs (aspirin +
+  ramipril) that appear on a label which is not the pair’s own FDC.
 
 ---
 
@@ -464,7 +500,14 @@ retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 - Tesseract often absent; health reports `"tesseract": false`; vision fallback used.
 - Image-level PHI redaction before vision is **not v1** (locked; do not build it here).
 - Duplicate-therapy detection (two NSAIDs) omitted on purpose (PLAN §6 #8).
-- Live 30-pair full `/api/check` eval lives on **this branch** (`eval/live-check-30`), not default pytest and not on `main`.
+- Live eval lives on **this branch** (`eval/live-check-30`), not default pytest
+  and not on `main`.
+- `Amlong` can normalize to **s-amlodipine** instead of amlodipine (hides some
+  Twynsta pair checks). Separate normalize bug; do not paper over it in labels.
+- Overlay never downgrades a true CI to timing (levothyroxine + calcium is
+  timing only when the label hit is interaction, not pair-scoped CI).
+- 429 / `source_tier=error` is out of spec for the no-CI judge; retry exists
+  but a pair can still error.
 
 ---
 
