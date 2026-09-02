@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "notes": "Live POST /api/check polypharmacy: 10×3-drug, 5×4-drug, 5×5-drug. Real-world regimens. No PHI. Not default pytest.",
+  "cases": [
+    {
+      "id": "af-triple-therapy",
+      "text": "warfarin 5 mg once daily, aspirin 75 mg once daily, clopidogrel 75 mg once daily",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["warfarin", "aspirin", "clopidogrel"],
+        "pair": ["warfarin", "aspirin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "af-amiodarone-statin",
+      "text": "warfarin 5 mg, amiodarone 200 mg, simvastatin 20 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["warfarin", "amiodarone", "simvastatin"],
+        "pair": ["warfarin", "amiodarone"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "gout-macrolide-statin",
+      "text": "colchicine 0.5 mg, clarithromycin 500 mg, atorvastatin 40 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["colchicine", "clarithromycin", "atorvastatin"],
+        "pair": ["colchicine", "clarithromycin"],
+        "grade": "A",
+        "banner": true
+      }
+    },
+    {
+      "id": "hf-acei-spiro-k",
+      "text": "enalapril 10 mg, spironolactone 25 mg, potassium chloride 600 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["enalapril", "spironolactone", "potassium"],
+        "pair": ["spironolactone", "potassium"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "ra-uti-nsaid",
+      "text": "methotrexate 15 mg weekly, trimethoprim 200 mg, ibuprofen 400 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["methotrexate", "trimethoprim", "ibuprofen"],
+        "pair": ["methotrexate", "trimethoprim"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "thyroid-calcium-iron",
+      "text": "levothyroxine 50 mcg morning, calcium carbonate 500 mg, ferrous sulfate 200 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["levothyroxine", "calcium", "ferrous"],
+        "pair": ["levothyroxine", "calcium"],
+        "category": "timing"
+      }
+    },
+    {
+      "id": "cad-amlodipine-macrolide",
+      "text": "simvastatin 40 mg, amlodipine 5 mg, clarithromycin 500 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["simvastatin", "amlodipine", "clarithromycin"],
+        "pair": ["clarithromycin", "simvastatin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "pde5-nitrate-htn",
+      "text": "sildenafil 50 mg, isosorbide mononitrate 30 mg, amlodipine 5 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["sildenafil", "isosorbide", "amlodipine"],
+        "pair": ["sildenafil", "isosorbide"],
+        "banner": true
+      }
+    },
+    {
+      "id": "tb-warfarin",
+      "text": "rifampicin 600 mg, isoniazid 300 mg, warfarin 5 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["rifampicin", "isoniazid", "warfarin"],
+        "pair": ["rifampicin", "warfarin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "azathioprine-allopurinol-steroid",
+      "text": "azathioprine 50 mg, allopurinol 100 mg, prednisolone 5 mg",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["azathioprine", "allopurinol", "prednisolone"],
+        "pair": ["allopurinol", "azathioprine"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "hf-af-four",
+      "text": "digoxin 0.125 mg, amiodarone 200 mg, warfarin 5 mg, furosemide 40 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["digoxin", "amiodarone", "warfarin", "furosemide"],
+        "pair": ["digoxin", "amiodarone"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "post-acs-ppi",
+      "text": "aspirin 75 mg, clopidogrel 75 mg, omeprazole 20 mg, atorvastatin 40 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["aspirin", "clopidogrel", "omeprazole", "atorvastatin"],
+        "pair": ["clopidogrel", "omeprazole"]
+      }
+    },
+    {
+      "id": "lithium-thiazide-nsaid-ssri",
+      "text": "lithium carbonate 300 mg, hydrochlorothiazide 25 mg, ibuprofen 400 mg, sertraline 50 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["lithium", "hydrochlorothiazide", "ibuprofen", "sertraline"],
+        "pair": ["lithium", "ibuprofen"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "cipro-tizanidine-pain",
+      "text": "ciprofloxacin 500 mg, tizanidine 2 mg, ibuprofen 400 mg, omeprazole 20 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["ciprofloxacin", "tizanidine", "ibuprofen", "omeprazole"],
+        "pair": ["ciprofloxacin", "tizanidine"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "verapamil-simva-cad",
+      "text": "verapamil 120 mg, simvastatin 40 mg, amlodipine 5 mg, aspirin 75 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["verapamil", "simvastatin", "amlodipine", "aspirin"],
+        "pair": ["verapamil", "simvastatin"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "hf-ref-five",
+      "text": "lisinopril 10 mg, spironolactone 25 mg, digoxin 0.125 mg, furosemide 40 mg, potassium chloride 600 mg",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["lisinopril", "spironolactone", "digoxin", "furosemide", "potassium"],
+        "pair": ["spironolactone", "potassium"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "af-cad-five",
+      "text": "warfarin 5 mg, amiodarone 200 mg, digoxin 0.125 mg, simvastatin 20 mg, aspirin 75 mg",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["warfarin", "amiodarone", "digoxin", "simvastatin", "aspirin"],
+        "pair": ["warfarin", "amiodarone"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "gout-infection-five",
+      "text": "colchicine 0.5 mg, clarithromycin 500 mg, atorvastatin 40 mg, allopurinol 100 mg, azathioprine 50 mg",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["colchicine", "clarithromycin", "atorvastatin", "allopurinol", "azathioprine"],
+        "pair": ["colchicine", "clarithromycin"],
+        "grade": "A",
+        "banner": true
+      }
+    },
+    {
+      "id": "maoi-serotonin-five",
+      "text": "phenelzine 15 mg, fluoxetine 20 mg, tramadol 50 mg, ibuprofen 400 mg, omeprazole 20 mg",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["phenelzine", "fluoxetine", "tramadol", "ibuprofen", "omeprazole"],
+        "pair": ["phenelzine", "fluoxetine"],
+        "banner": true
+      }
+    },
+    {
+      "id": "mtx-infection-five",
+      "text": "methotrexate 15 mg weekly, trimethoprim 200 mg, ibuprofen 400 mg, omeprazole 20 mg, folic acid 5 mg",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["methotrexate", "trimethoprim", "ibuprofen", "omeprazole", "folic"],
+        "pair": ["methotrexate", "trimethoprim"],
+        "grade": "A"
+      }
+    }
+  ]
+}

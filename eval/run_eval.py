@@ -38,6 +38,8 @@ EXPECT_KEYS = {
     "fdc_min_components",
     "patient_note",
     "dose_condition",
+    "no_contraindication",
+    "pairs_not_grade_a",
 }
 
 
@@ -49,7 +51,7 @@ def load_cases() -> list[dict]:
     return cases
 
 
-def validate_cases(cases: list[dict]) -> list[str]:
+def validate_cases(cases: list[dict], *, require_anchors: bool = True) -> list[str]:
     errors: list[str] = []
     ids: set[str] = set()
     for i, case in enumerate(cases):
@@ -84,11 +86,25 @@ def validate_cases(cases: list[dict]) -> list[str]:
             errors.append(f"{loc}: grade_in requires pair")
         if expect.get("category") and not pair:
             errors.append(f"{loc}: category requires pair")
-    if len(cases) < 30:
-        errors.append(f"need ~30 cases, found {len(cases)}")
-    missing_anchors = REQUIRED_IDS - {c.get("id") for c in cases}
-    if missing_anchors:
-        errors.append(f"missing anchors {sorted(missing_anchors)}")
+        not_a = expect.get("pairs_not_grade_a")
+        if not_a is not None:
+            if not isinstance(not_a, list) or not not_a:
+                errors.append(f"{loc}: pairs_not_grade_a must be a non-empty list")
+            else:
+                for item in not_a:
+                    if (
+                        not isinstance(item, list) or len(item) != 2
+                        or not all(isinstance(x, str) and x.strip() for x in item)
+                    ):
+                        errors.append(f"{loc}: pairs_not_grade_a items must be two names")
+    if require_anchors:
+        if len(cases) < 30:
+            errors.append(f"need ~30 cases, found {len(cases)}")
+        missing_anchors = REQUIRED_IDS - {c.get("id") for c in cases}
+        if missing_anchors:
+            errors.append(f"missing anchors {sorted(missing_anchors)}")
+    elif not cases:
+        errors.append("need at least 1 case")
     return errors
 
 
@@ -200,6 +216,26 @@ def judge(case: dict, resp: dict) -> list[str]:
         _fail(failures, "expected contraindication banner")
     if expect.get("banner") is False and banner:
         _fail(failures, f"unexpected banner { [b.get('drugs') for b in banner] }")
+
+    if expect.get("no_contraindication"):
+        if banner:
+            _fail(failures, f"unexpected banner {[b.get('drugs') for b in banner]}")
+        ci = [
+            p.get("drugs")
+            for p in (resp.get("pairs") or [])
+            if p.get("category") == "contraindicated"
+        ]
+        if ci:
+            _fail(failures, f"contraindicated pairs {ci}")
+
+    for pair_spec in expect.get("pairs_not_grade_a") or []:
+        found_na = _find_pair(resp, pair_spec[0], pair_spec[1])
+        if found_na is not None and found_na.get("grade") == "A":
+            _fail(
+                failures,
+                f"pair {pair_spec} should not be Grade A "
+                f"(grade={found_na.get('grade')!r} category={found_na.get('category')!r})",
+            )
 
     if expect.get("avoid_substance"):
         want = expect["avoid_substance"].lower()
@@ -361,6 +397,43 @@ def matcher_self_check() -> list[str]:
     }, {**shot, "pairs": []})
     if not f:
         errors.append("screenshot-quartet without warfarin-omeprazole should fail")
+
+    noci = {
+        **a_ok,
+        "pairs": [{
+            "drugs": ["metformin", "sitagliptin"],
+            "grade": None,
+            "category": "none",
+            "citations": [],
+        }],
+        "contraindicated_banner": [],
+    }
+    f = judge(
+        {"id": "t2dm-oral-triple", "expect": {
+            "no_contraindication": True,
+            "pairs_not_grade_a": [["metformin", "sitagliptin"]],
+        }},
+        noci,
+    )
+    if f:
+        errors.append(f"no-CI colist should pass: {f}")
+    f = judge(
+        {"id": "t2dm-oral-triple", "expect": {
+            "no_contraindication": True,
+            "pairs_not_grade_a": [["metformin", "sitagliptin"]],
+        }},
+        {**noci, "pairs": [{
+            "drugs": ["metformin", "sitagliptin"],
+            "grade": "A",
+            "category": "contraindicated",
+            "citations": [{"source": "openfda", "title": "label"}],
+        }], "contraindicated_banner": [{
+            "drugs": ["metformin", "sitagliptin"],
+            "category": "contraindicated",
+        }]},
+    )
+    if not f:
+        errors.append("no-CI colist Grade A banner should fail")
     return errors
 
 
@@ -415,10 +488,22 @@ def main(argv: list[str] | None = None) -> int:
         help="hit a running server (e.g. http://127.0.0.1:8000); default is in-process ASGI",
     )
     p.add_argument("--json-out", type=Path, default=None)
+    p.add_argument(
+        "--cases",
+        type=Path,
+        default=None,
+        help="cases JSON path (default: eval/cases.json)",
+    )
     args = p.parse_args(argv)
 
-    cases = load_cases()
-    schema_errors = validate_cases(cases)
+    cases_path = args.cases.resolve() if args.cases else CASES_PATH
+    blob = json.loads(cases_path.read_text())
+    cases = blob.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise SystemExit(f"no cases in {cases_path}")
+    schema_errors = validate_cases(
+        cases, require_anchors=cases_path.resolve() == CASES_PATH.resolve()
+    )
     if schema_errors:
         print("cases.json invalid:", file=sys.stderr)
         for e in schema_errors:
@@ -435,14 +520,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit:
         cases = cases[: args.limit]
 
-    print(f"{len(cases)} cases from {CASES_PATH}")
+    print(f"{len(cases)} cases from {cases_path}")
     if args.dry_run:
-        self_errors = matcher_self_check()
-        if self_errors:
-            print("matcher self-check failed:", file=sys.stderr)
-            for e in self_errors:
-                print(f"  {e}", file=sys.stderr)
-            return 2
+        if cases_path.resolve() == CASES_PATH.resolve():
+            self_errors = matcher_self_check()
+            if self_errors:
+                print("matcher self-check failed:", file=sys.stderr)
+                for e in self_errors:
+                    print(f"  {e}", file=sys.stderr)
+                return 2
         print("dry-run ok")
         return 0
 

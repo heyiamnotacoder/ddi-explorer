@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "notes": "Live POST /api/check: common co-prescribed regimens that must not raise a contraindication banner. 10×3-drug, 5×4-drug, 5×5-drug. No PHI. Not default pytest.",
+  "cases": [
+    {
+      "id": "t2dm-oral-triple",
+      "text": "Tab metformin 500 mg 1-0-1, Tab sitagliptin 100 mg once daily, Tab glimepiride 1 mg before breakfast",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["metformin", "sitagliptin", "glimepiride"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [["metformin", "sitagliptin"]]
+      }
+    },
+    {
+      "id": "htn-telma-amlong-hctz",
+      "text": "Telma 40, Amlong 5, hydrochlorothiazide 12.5 mg once daily",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["telmisartan", "amlodipine", "hydrochlorothiazide"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [
+          ["telmisartan", "hydrochlorothiazide"],
+          ["amlodipine", "telmisartan"]
+        ]
+      }
+    },
+    {
+      "id": "cad-bb-acei-statin",
+      "text": "metoprolol 50 mg twice daily, ramipril 5 mg once daily, atorvastatin 40 mg at night",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["metoprolol", "ramipril", "atorvastatin"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "uri-amox-pcm-cetirizine",
+      "text": "amoxicillin 500 mg thrice daily, Dolo 650, cetirizine 10 mg at night",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["amoxicillin", "paracetamol", "cetirizine"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "hypothyroid-metformin-statin",
+      "text": "levothyroxine 50 mcg empty stomach, metformin 500 mg twice daily, atorvastatin 20 mg at night",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["levothyroxine", "metformin", "atorvastatin"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "asthma-allergy-triple",
+      "text": "budesonide inhaler 200 mcg twice daily, montelukast 10 mg at night, levocetirizine 5 mg at night",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["budesonide", "montelukast", "levocetirizine"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "bph-finasteride-amlodipine",
+      "text": "tamsulosin 0.4 mg at night, finasteride 5 mg once daily, amlodipine 5 mg once daily",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["tamsulosin", "finasteride", "amlodipine"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "depression-t2dm-htn",
+      "text": "sertraline 50 mg morning, metformin 500 mg twice daily, amlodipine 5 mg once daily",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["sertraline", "metformin", "amlodipine"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "gerd-htn-pcm",
+      "text": "Pan 40 before breakfast, Amlong 5, Dolo 650 as needed for pain",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["pantoprazole", "amlodipine", "paracetamol"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "t2dm-sglt2-arb",
+      "text": "metformin 500 mg twice daily, empagliflozin 10 mg once daily, telmisartan 40 mg once daily",
+      "expect": {
+        "min_normalized": 3,
+        "max_normalized": 3,
+        "generics_include": ["metformin", "empagliflozin", "telmisartan"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [["empagliflozin", "metformin"]]
+      }
+    },
+    {
+      "id": "t2dm-htn-four",
+      "text": "metformin 500 mg 1-0-1, sitagliptin 100 mg once daily, Telma 40, Amlong 5",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["metformin", "sitagliptin", "telmisartan", "amlodipine"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [["metformin", "sitagliptin"]]
+      }
+    },
+    {
+      "id": "cad-gdmt-aspirin",
+      "text": "aspirin 75 mg after lunch, metoprolol 50 mg twice daily, ramipril 5 mg once daily, atorvastatin 40 mg at night",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["aspirin", "metoprolol", "ramipril", "atorvastatin"],
+        "no_contraindication": true,
+        "pair": ["aspirin", "ramipril"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "copd-inhalers-amlodipine",
+      "text": "tiotropium 18 mcg once daily, budesonide 200 mcg twice daily, formoterol 6 mcg twice daily, amlodipine 5 mg once daily",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["tiotropium", "budesonide", "formoterol", "amlodipine"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [["budesonide", "formoterol"]]
+      }
+    },
+    {
+      "id": "oa-t2dm-htn",
+      "text": "Dolo 650, metformin 500 mg twice daily, telmisartan 40 mg, amlodipine 5 mg",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["paracetamol", "metformin", "telmisartan", "amlodipine"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "hypothyroid-t2dm-htn-statin",
+      "text": "levothyroxine 75 mcg empty stomach, metformin 500 mg twice daily, telmisartan 40 mg, atorvastatin 20 mg at night",
+      "expect": {
+        "min_normalized": 4,
+        "max_normalized": 4,
+        "generics_include": ["levothyroxine", "metformin", "telmisartan", "atorvastatin"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "t2dm-htn-lipid-five",
+      "text": "metformin 500 mg 1-0-1, sitagliptin 100 mg once daily, Telma 40, Amlong 5, atorvastatin 20 mg at night",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["metformin", "sitagliptin", "telmisartan", "amlodipine", "atorvastatin"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [["metformin", "sitagliptin"]]
+      }
+    },
+    {
+      "id": "post-mi-gdmt-ppi",
+      "text": "aspirin 75 mg after lunch, metoprolol 50 mg twice daily, ramipril 5 mg once daily, atorvastatin 40 mg at night, Pan 40 before breakfast",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["aspirin", "metoprolol", "ramipril", "atorvastatin", "pantoprazole"],
+        "no_contraindication": true,
+        "pair": ["aspirin", "ramipril"],
+        "grade": "A"
+      }
+    },
+    {
+      "id": "elderly-bph-metabolic",
+      "text": "tamsulosin 0.4 mg at night, amlodipine 5 mg, telmisartan 40 mg, metformin 500 mg twice daily, atorvastatin 20 mg at night",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["tamsulosin", "amlodipine", "telmisartan", "metformin", "atorvastatin"],
+        "no_contraindication": true
+      }
+    },
+    {
+      "id": "asthma-allergy-gerd-five",
+      "text": "budesonide inhaler 200 mcg twice daily, formoterol 6 mcg twice daily, montelukast 10 mg at night, levocetirizine 5 mg at night, pantoprazole 40 mg before breakfast",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["budesonide", "formoterol", "montelukast", "levocetirizine", "pantoprazole"],
+        "no_contraindication": true,
+        "pairs_not_grade_a": [["budesonide", "formoterol"]]
+      }
+    },
+    {
+      "id": "depression-t2dm-htn-gerd",
+      "text": "sertraline 50 mg morning, metformin 500 mg twice daily, amlodipine 5 mg, telmisartan 40 mg, Pan 40 before breakfast",
+      "expect": {
+        "min_normalized": 5,
+        "max_normalized": 5,
+        "generics_include": ["sertraline", "metformin", "amlodipine", "telmisartan", "pantoprazole"],
+        "no_contraindication": true
+      }
+    }
+  ]
+}
