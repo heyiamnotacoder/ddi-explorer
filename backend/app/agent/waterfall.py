@@ -20,11 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 
 from ..config import get_settings
 from ..models import Category, Citation, Grade, PairResult
 from . import llm, pair_cache, tools
+
+logger = logging.getLogger(__name__)
 
 _STRONG_PUBTYPES = (
     "Randomized Controlled Trial",
@@ -223,23 +226,7 @@ def split_pubmed(pubs: list[dict]) -> tuple[list[dict], list[dict]]:
 
 async def _fetched_web(hits: list[dict]) -> list[dict]:
     """Fetch search hits. Unfetched URLs never enter the citation pool."""
-    chosen = [h for h in hits if str(h.get("url") or "").strip()][:_MAX_WEB_FETCHES]
-    if not chosen:
-        return []
-    bodies = await asyncio.gather(
-        *(tools.web_fetch(str(h["url"])) for h in chosen))
-    out: list[dict] = []
-    for hit, body in zip(chosen, bodies):
-        text = (body or "").strip()
-        if not text:
-            continue
-        out.append({
-            "title": hit.get("title") or "web page",
-            "url": str(hit["url"]),
-            "snippet": hit.get("snippet", ""),
-            "content": text[:4000],
-        })
-    return out
+    return await tools.fetch_web_pages(hits, _MAX_WEB_FETCHES)
 
 
 def _with_conflict(result: PairResult, text: str) -> PairResult:
@@ -444,6 +431,7 @@ async def evaluate_pairs(pairs: list[tuple[str, str]],
             try:
                 computed[k] = await evaluate_pair(a, b, patient_context)
             except Exception as e:  # noqa: BLE001 — never lose a whole run to one pair
+                logger.exception("pair evaluation failed for %s + %s", a, b)
                 computed[k] = _error_pair(
                     a.lower(), b.lower(),
                     f"Evaluation failed: {type(e).__name__}",

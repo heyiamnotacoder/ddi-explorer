@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   checkInteractions,
   suggestAlternatives,
@@ -208,7 +208,9 @@ function AvoidBox({ items }: { items: AvoidWithItem[] }) {
   );
 }
 
-function PairMatrix({ components, pairs }: { components: string[]; pairs: PairResult[] }) {
+const PairMatrix = memo(function PairMatrix(
+  { components, pairs }: { components: string[]; pairs: PairResult[] },
+) {
   if (components.length < 2) return null;
   const map = new Map(
     pairs
@@ -249,7 +251,7 @@ function PairMatrix({ components, pairs }: { components: string[]; pairs: PairRe
       </table>
     </div>
   );
-}
+});
 
 export default function App() {
   const [text, setText] = useState("");
@@ -325,7 +327,10 @@ export default function App() {
     }
   };
 
-  const components = result ? uniqueComponents(result) : [];
+  const components = useMemo(
+    () => (result ? uniqueComponents(result) : []),
+    [result],
+  );
   const expectedPairs = components.length >= 2
     ? (components.length * (components.length - 1)) / 2
     : 0;
@@ -337,17 +342,7 @@ export default function App() {
 
   const insuffPairs = useMemo(() => {
     if (!result) return [];
-    const fromPairs = result.pairs.filter(isInsufficient);
-    if (fromPairs.length) return fromPairs;
-    return result.insufficient_evidence.map(([a, b]) => ({
-      drugs: [a, b] as [string, string],
-      grade: null,
-      category: "interaction" as const,
-      summary: "Insufficient evidence to determine.",
-      citations: [],
-      severe_if: [],
-      source_tier: "insufficient",
-    }));
+    return result.pairs.filter(isInsufficient);
   }, [result]);
 
   const counts = useMemo(() => {
@@ -359,13 +354,16 @@ export default function App() {
     return c;
   }, [ddiPairs]);
 
-  const visible = ddiPairs.filter((p) => {
+  const visible = useMemo(() => ddiPairs.filter((p) => {
     if (filter === "timing") return p.category === "timing";
     if (filter === "flagged") return p.category !== "timing";
     return true;
-  });
+  }), [ddiPairs, filter]);
 
-  const fdcs = result?.normalized_drugs.filter((d) => d.components.length > 1) ?? [];
+  const fdcs = useMemo(
+    () => result?.normalized_drugs.filter((d) => d.components.length > 1) ?? [],
+    [result],
+  );
 
   const openSnapshot = (s: CheckSnapshot) => {
     setResult(s.result);

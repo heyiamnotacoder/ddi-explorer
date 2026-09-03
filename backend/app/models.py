@@ -9,6 +9,17 @@ class Grade(str, Enum):
     B = "B"  # human RCT / PK / meta-analysis, not in labeling
     C = "C"  # case reports, in-vitro, mechanistic extrapolation
 
+    @staticmethod
+    def strength(grade: "Grade | None") -> int:
+        """Evidence strength, lower is stronger. Ungraded sorts last.
+
+        Single source of truth for "which grade beats which" on the backend.
+        """
+        return _GRADE_STRENGTH.get(grade, len(_GRADE_STRENGTH))
+
+
+_GRADE_STRENGTH: dict[Grade | None, int] = {Grade.A: 0, Grade.B: 1, Grade.C: 2, None: 3}
+
 
 class Category(str, Enum):
     INTERACTION = "interaction"
@@ -133,3 +144,7 @@ class AlternativesResponse(BaseModel):
     keep: list[ReplaceableDrug] = Field(default_factory=list)
     timing_first: list[str] = Field(default_factory=list)
     disclaimer: str
+
+
+class OcrRequest(BaseModel):
+    image: str  # data URL

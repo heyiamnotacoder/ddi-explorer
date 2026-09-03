@@ -11,6 +11,7 @@ transcript is still scrubbed before extract.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import shutil
@@ -59,7 +60,7 @@ async def extract_text(data_url: str) -> dict:
 
     if TESSERACT_AVAILABLE:
         try:
-            text, conf = _tesseract(data_url)
+            text, conf = await asyncio.to_thread(_tesseract, data_url)
             if conf >= settings.ocr_confidence_threshold:
                 return {"text": text, "engine": "tesseract", "confidence": conf}
         except Exception:  # noqa: BLE001 — fall through to vision

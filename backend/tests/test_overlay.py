@@ -146,7 +146,7 @@ def test_openfda_grade_a_is_overlaid_like_local():
 
 
 @pytest.mark.asyncio
-async def test_check_keeps_dose_schedule_and_overlays_without_waterfall(monkeypatch):
+async def test_check_keeps_dose_schedule_and_overlays_without_waterfall(monkeypatch, patch_seams):
     waterfall_calls: list = []
 
     async def fake_extract(_text: str) -> dict:
@@ -176,10 +176,8 @@ async def test_check_keeps_dose_schedule_and_overlays_without_waterfall(monkeypa
         waterfall_calls.append((pairs, patient_ctx))
         return []
 
-    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_waterfall)
 
     resp = await service.run_check(CheckRequest(
         text="Thyronorm 50 1-0-0, calcium 0-0-1",

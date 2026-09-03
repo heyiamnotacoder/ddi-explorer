@@ -11,7 +11,6 @@ synthesis. The LLM never fabricates: no retrieved record -> no citation.
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import re
 import urllib.parse
@@ -130,6 +129,24 @@ _PDE5_ALIASES = (
 )
 
 
+def _spelling_variants(name: str, *, both_ways: bool = True) -> set[str]:
+    """British/US spellings of `name`, including `name` itself.
+
+    `both_ways=False` only substitutes British -> US: the ClinicalTrials.gov
+    term search is deliberately narrower than the label and PubMed queries.
+    """
+    variants = {name}
+    for brit, us in SPELLING_VARIANTS.items():
+        if brit in name:
+            variants |= {name.replace(brit, u) for u in us}
+        if not both_ways:
+            continue
+        for u in us:
+            if u in name:
+                variants.add(name.replace(u, brit))
+    return variants
+
+
 def _clean_term(name: str) -> str:
     return (name or "").replace('"', "").strip()
 
@@ -140,13 +157,7 @@ def _label_aliases(name: str) -> list[str]:
     if not raw:
         return []
     n = raw.lower()
-    variants = {n}
-    for brit, us in SPELLING_VARIANTS.items():
-        if brit in n:
-            variants |= {n.replace(brit, u) for u in us}
-        for u in us:
-            if u in n:
-                variants.add(n.replace(u, brit))
+    variants = _spelling_variants(n)
     if n in _NITRATE_NAMES or n.startswith("isosorbide"):
         variants.update(_NITRATE_ALIASES)
     folded = n.replace("-", "").replace(" ", "")
@@ -573,13 +584,7 @@ EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 def _term_variants(name: str) -> str:
     """'amoxycillin' -> (\"amoxycillin\"[tiab] OR \"amoxicillin\"[tiab])"""
-    variants = {name}
-    for brit, us in SPELLING_VARIANTS.items():
-        if brit in name:
-            variants |= {name.replace(brit, u) for u in us}
-        for u in us:
-            if u in name:
-                variants.add(name.replace(u, brit))
+    variants = _spelling_variants(name)
     return "(" + " OR ".join(f'"{v}"[Title/Abstract]' for v in sorted(variants)) + ")"
 
 
@@ -651,11 +656,7 @@ async def _fetch_abstracts(client: httpx.AsyncClient, pmids: list[str]) -> dict[
 # Tier 2 — ClinicalTrials.gov v2
 # --------------------------------------------------------------------------
 def _plain_variants(name: str) -> list[str]:
-    variants = {name}
-    for brit, us in SPELLING_VARIANTS.items():
-        if brit in name:
-            variants |= {name.replace(brit, u) for u in us}
-    return sorted(variants)
+    return sorted(_spelling_variants(name, both_ways=False))
 
 
 async def clinicaltrials_search(drug_a: str, drug_b: str, *, page_size: int = 5) -> list[dict]:
@@ -728,5 +729,24 @@ async def web_fetch(url: str) -> str:
             return ""
 
 
-# Keep os import used (API keys may arrive via env passthrough for litellm)
-_ = os.environ
+async def fetch_web_pages(hits: list[dict], limit: int) -> list[dict]:
+    """Retrieve search hits. A URL that did not come back is not a citation.
+
+    Shared by the evidence waterfall and by web name resolution.
+    """
+    chosen = [h for h in hits if str(h.get("url") or "").strip()][:limit]
+    if not chosen:
+        return []
+    bodies = await asyncio.gather(*(web_fetch(str(h["url"])) for h in chosen))
+    out: list[dict] = []
+    for hit, body in zip(chosen, bodies):
+        text = (body or "").strip()
+        if not text:
+            continue
+        out.append({
+            "title": hit.get("title") or "web page",
+            "url": str(hit["url"]),
+            "snippet": hit.get("snippet", ""),
+            "content": text[:4000],
+        })
+    return out

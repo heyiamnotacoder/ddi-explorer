@@ -57,22 +57,7 @@ def _mentioned(name: str, blob: str) -> bool:
 
 
 async def _fetched(hits: list[dict]) -> list[dict]:
-    chosen = [h for h in hits if str(h.get("url") or "").strip()][:_MAX_FETCH]
-    if not chosen:
-        return []
-    bodies = await asyncio.gather(*(tools.web_fetch(str(h["url"])) for h in chosen))
-    out: list[dict] = []
-    for hit, body in zip(chosen, bodies):
-        text = (body or "").strip()
-        if not text:
-            continue
-        out.append({
-            "title": hit.get("title") or "web page",
-            "url": str(hit["url"]),
-            "snippet": hit.get("snippet", ""),
-            "content": text[:4000],
-        })
-    return out
+    return await tools.fetch_web_pages(hits, _MAX_FETCH)
 
 
 def _generics_from(parsed: dict, blob: str) -> list[str]:

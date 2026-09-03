@@ -183,7 +183,7 @@ async def test_keeps_dose_schedule_on_web_hit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_web_resolved_name_enters_prefilter_not_unresolved(monkeypatch):
+async def test_check_web_resolved_name_enters_prefilter_not_unresolved(monkeypatch, patch_seams):
     prefilter_names: list[str] = []
 
     async def fake_extract(_text: str) -> dict:
@@ -230,15 +230,13 @@ async def test_check_web_resolved_name_enters_prefilter_not_unresolved(monkeypat
     async def fake_avoid(*_a, **_k):
         return []
 
-    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
     monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
     monkeypatch.setattr(web_resolve.tools, "web_fetch", fake_fetch)
     monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
     monkeypatch.setattr(web_resolve.norm, "_rxcuis_for_components", _no_rxcui)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
-    monkeypatch.setattr(service.avoid_mod, "lookup", fake_avoid)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_waterfall,
+                avoid=fake_avoid)
 
     resp = await service.run_check(CheckRequest(text="Telmafoo, warfarin"))
     assert resp.disclaimer == DISCLAIMER

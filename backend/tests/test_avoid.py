@@ -153,7 +153,7 @@ async def test_no_non_drugs_skips_lookup(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_non_drugs_never_enter_pair_checking(monkeypatch):
+async def test_non_drugs_never_enter_pair_checking(monkeypatch, patch_seams):
     prefilter_names: list[str] = []
     waterfall_pairs: list = []
 
@@ -183,10 +183,8 @@ async def test_non_drugs_never_enter_pair_checking(monkeypatch):
     async def fake_check(_drug: str, _terms: list[str]) -> list[dict]:
         return []
 
-    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_waterfall)
     monkeypatch.setattr(avoid.tools, "openfda_substance_check", fake_check)
 
     resp = await service.run_check(CheckRequest(

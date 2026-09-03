@@ -282,52 +282,62 @@ def split_components(generic_string: str) -> list[str]:
     return cleaned
 
 
+async def _resolve_one(client: httpx.AsyncClient, raw: str) -> NormalizedDrug:
+    """Resolve one raw name: Indian dataset -> RxNav -> unresolved."""
+    # 1) Indian brand dataset
+    comps = _lookup_indian(raw)
+    if comps:
+        flat: list[str] = []
+        seen: set[str] = set()
+        for comp in comps:
+            for c in split_components(comp):
+                if c not in seen:
+                    seen.add(c)
+                    flat.append(c)
+        if not flat:
+            return NormalizedDrug(input_name=raw, resolved_via=None)
+        cuis = await _rxcuis_for_components(client, flat)
+        rxcui = next((cuis[c] for c in flat if c in cuis), None)
+        return NormalizedDrug(
+            input_name=raw, generic_name=", ".join(flat),
+            rxcui=rxcui, components=flat, component_rxcuis=cuis,
+            resolved_via="indian_dataset")
+
+    # 2) RxNav
+    rxcui, generic = await _rxnav_resolve(client, raw)
+    if generic:
+        comps = split_components(generic)
+        if len(comps) <= 1:
+            cuis = {comps[0]: rxcui} if comps and rxcui else {}
+        else:
+            cuis = await _rxcuis_for_components(client, comps)
+            rxcui = next((cuis[c] for c in comps if c in cuis), rxcui)
+        return NormalizedDrug(
+            input_name=raw, generic_name=generic.lower(),
+            rxcui=rxcui, components=comps, component_rxcuis=cuis,
+            resolved_via="rxnav")
+
+    # 3) miss — service may web-verify via agent.web_resolve
+    return NormalizedDrug(input_name=raw, resolved_via=None)
+
+
 async def normalize_drugs(names: list[str]) -> tuple[list[NormalizedDrug], list[str]]:
-    """Resolve each raw name. Returns (normalized, unresolved_names)."""
+    """Resolve each raw name. Returns (normalized, unresolved_names).
+
+    Names are independent, so they resolve concurrently; both returned lists
+    stay in input order.
+    """
     settings = get_settings()
     names = [n.strip() for n in names if n.strip()][: settings.max_drugs_per_request]
-    normalized: list[NormalizedDrug] = []
-    unresolved: list[str] = []
 
     async with httpx.AsyncClient() as client:
-        for raw in names:
-            # 1) Indian brand dataset
-            comps = _lookup_indian(raw)
-            if comps:
-                flat: list[str] = []
-                seen: set[str] = set()
-                for comp in comps:
-                    for c in split_components(comp):
-                        if c not in seen:
-                            seen.add(c)
-                            flat.append(c)
-                if not flat:
-                    unresolved.append(raw)
-                    normalized.append(NormalizedDrug(input_name=raw, resolved_via=None))
-                    continue
-                cuis = await _rxcuis_for_components(client, flat)
-                rxcui = next((cuis[c] for c in flat if c in cuis), None)
-                normalized.append(NormalizedDrug(
-                    input_name=raw, generic_name=", ".join(flat),
-                    rxcui=rxcui, components=flat, component_rxcuis=cuis,
-                    resolved_via="indian_dataset"))
-                continue
-            # 2) RxNav
-            rxcui, generic = await _rxnav_resolve(client, raw)
-            if generic:
-                comps = split_components(generic)
-                if len(comps) <= 1:
-                    cuis = {comps[0]: rxcui} if comps and rxcui else {}
-                else:
-                    cuis = await _rxcuis_for_components(client, comps)
-                    rxcui = next((cuis[c] for c in comps if c in cuis), rxcui)
-                normalized.append(NormalizedDrug(
-                    input_name=raw, generic_name=generic.lower(),
-                    rxcui=rxcui, components=comps, component_rxcuis=cuis,
-                    resolved_via="rxnav"))
-                continue
-            # 3) miss — service may web-verify via agent.web_resolve
-            unresolved.append(raw)
-            normalized.append(NormalizedDrug(input_name=raw, resolved_via=None))
+        sem = asyncio.Semaphore(settings.pair_concurrency)
 
+        async def one(raw: str) -> NormalizedDrug:
+            async with sem:
+                return await _resolve_one(client, raw)
+
+        normalized = list(await asyncio.gather(*(one(n) for n in names)))
+
+    unresolved = [d.input_name for d in normalized if not d.components]
     return normalized, unresolved

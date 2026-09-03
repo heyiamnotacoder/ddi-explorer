@@ -527,7 +527,7 @@ def test_grade_b_is_not_overlaid():
 
 
 @pytest.mark.asyncio
-async def test_contraindicated_pair_fills_banner(monkeypatch):
+async def test_contraindicated_pair_fills_banner(monkeypatch, patch_seams):
     async def fake_extract(_text: str) -> dict:
         return {
             "drugs": [
@@ -557,11 +557,9 @@ async def test_contraindicated_pair_fills_banner(monkeypatch):
             source_tier="openfda",
         )]
 
-    monkeypatch.setattr("app.service.extract.extract_drugs", fake_extract)
-    monkeypatch.setattr("app.service.norm.normalize_drugs", fake_norm)
-    monkeypatch.setattr("app.service.prefilter.check_known_pairs", fake_prefilter)
-    monkeypatch.setattr("app.service.waterfall.evaluate_pairs", fake_eval)
-    monkeypatch.setattr("app.service.avoid_mod.lookup", _empty_avoid)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_eval,
+                avoid=_empty_avoid)
 
     resp = await run_check(CheckRequest(text="sildenafil, isosorbide mononitrate"))
     assert resp.disclaimer == DISCLAIMER

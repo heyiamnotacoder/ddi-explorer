@@ -89,7 +89,7 @@ async def test_fdc_pairs_with_leftover_components():
 
 
 @pytest.mark.asyncio
-async def test_recheck_passes_normalized_drugs(monkeypatch):
+async def test_recheck_passes_normalized_drugs(monkeypatch, patch_seams):
     seen: dict = {}
 
     async def fake_norm(names):
@@ -102,9 +102,8 @@ async def test_recheck_passes_normalized_drugs(monkeypatch):
     async def fake_waterfall(*_a, **_k):
         return []
 
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
+    patch_seams(normalize=fake_norm, prefilter=fake_prefilter,
+                waterfall=fake_waterfall)
 
     leftover = _drug("warfarin", "warfarin", rxcui="11289")
     await service._recheck_against_rest("pantoprazole", [leftover], None)

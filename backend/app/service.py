@@ -10,6 +10,9 @@
 """
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
+
 from .agent import alternatives as alts
 from .agent import extract, waterfall, web_resolve
 from .models import (
@@ -26,6 +29,7 @@ from .models import (
 )
 from .pipeline import avoid as avoid_mod
 from .pipeline import normalize as norm
+from .config import get_settings
 from .pipeline import ocr, overlay, prefilter, scrubber
 
 DISCLAIMER = (
@@ -90,7 +94,6 @@ def _attach_extract_fields(
 
 def _dedupe_pairs(pairs: list[PairResult]) -> list[PairResult]:
     """Keep one result per unordered component pair; prefer a stronger grade."""
-    rank = {Grade.A: 0, Grade.B: 1, Grade.C: 2, None: 3}
     best: dict[tuple[str, str], PairResult] = {}
     order: list[tuple[str, str]] = []
     for p in pairs:
@@ -99,7 +102,7 @@ def _dedupe_pairs(pairs: list[PairResult]) -> list[PairResult]:
             best[key] = p
             order.append(key)
             continue
-        if rank.get(p.grade, 3) < rank.get(best[key].grade, 3):
+        if Grade.strength(p.grade) < Grade.strength(best[key].grade):
             best[key] = p
     return [best[k] for k in order]
 
@@ -107,11 +110,12 @@ def _dedupe_pairs(pairs: list[PairResult]) -> list[PairResult]:
 async def run_check(req: CheckRequest) -> CheckResponse:
     raw_texts: list[str] = []
 
-    # 1) OCR images -> raw text (local first, vision fallback)
-    for img in req.images:
-        result = await ocr.extract_text(img)
-        if result["text"].strip():
-            raw_texts.append(result["text"])
+    # 1) OCR images -> raw text (local first, vision fallback); images are
+    #    independent, so transcribe them concurrently and keep input order.
+    if req.images:
+        results = await asyncio.gather(
+            *(ocr.extract_text(img) for img in req.images))
+        raw_texts.extend(r["text"] for r in results if r["text"].strip())
 
     if req.text:
         raw_texts.append(req.text)
@@ -120,8 +124,9 @@ async def run_check(req: CheckRequest) -> CheckResponse:
     if req.timing:
         raw_texts.append(f"Timing: {req.timing}")
 
-    # 2) Presidio scrub — BEFORE any LLM sees anything
-    scrubbed = scrubber.scrub_text("\n".join(raw_texts))
+    # 2) Presidio scrub — BEFORE any LLM sees anything. spaCy NER is
+    #    CPU-bound; keep it off the event loop.
+    scrubbed = await asyncio.to_thread(scrubber.scrub_text, "\n".join(raw_texts))
 
     # 3) Structured extraction (first LLM contact; input is clean)
     extracted = await extract.extract_drugs(scrubbed.text)
@@ -212,6 +217,35 @@ async def _recheck_against_rest(
     return graded, alt.components, None
 
 
+@dataclass(slots=True)
+class _AltJob:
+    """One (drug to change, proposed alternative) candidate awaiting recheck."""
+    src: str
+    product: str | None
+    name: str
+    row: dict
+    alt: dict
+    old_pairs: list[PairResult]
+    remaining: list[NormalizedDrug]
+    on_list: bool
+
+
+def _rejected(
+    src: str, product: str | None, name: str,
+    row: dict, alt: dict, reason: str,
+) -> AlternativeSuggestion:
+    """A substitution that was considered and ruled out. No components: a
+    rejected candidate was never resolved against the rest of the list."""
+    return AlternativeSuggestion(
+        change_from=src, change_from_product=product,
+        change_to=name, indication=row.get("indication") or "",
+        rationale=alt.get("rationale") or "",
+        adr_note=alt.get("adr_note") or "",
+        safer=False,
+        reject_reason=reason,
+    )
+
+
 async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
     """Second loop over an already-graded prescription.
 
@@ -251,6 +285,7 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
     suggestions: list[AlternativeSuggestion] = []
     remaining_base = [d for d in req.normalized_drugs if d.components]
 
+    jobs: list[_AltJob] = []
     for row in change_rows:
         src = str(row.get("from") or "").strip()
         if not src:
@@ -266,74 +301,77 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
                     "components": comps,
                     "rxcui": item.rxcui_for(comps[0]),
                 }))
-
+        already = {
+            c.lower()
+            for d in req.normalized_drugs
+            for c in d.components
+            if c.lower() != src_l
+        }
         for alt in (row.get("alternatives") or [])[:2]:
             name = str(alt.get("name") or "").strip()
             if not name or name.lower() == src_l:
                 continue
-            already = {
-                c.lower()
-                for d in req.normalized_drugs
-                for c in d.components
-                if c.lower() != src_l
-            }
-            if name.lower() in already:
-                suggestions.append(AlternativeSuggestion(
-                    change_from=src, change_from_product=product,
-                    change_to=name, indication=row.get("indication") or "",
-                    rationale=alt.get("rationale") or "",
-                    adr_note=alt.get("adr_note") or "",
-                    safer=False,
-                    reject_reason="Already on this prescription.",
-                ))
-                continue
-            try:
-                new_pairs, comps, unresolved = await _recheck_against_rest(
-                    name, remaining, ctx)
-            except Exception as e:  # noqa: BLE001
-                suggestions.append(AlternativeSuggestion(
-                    change_from=src, change_from_product=product,
-                    change_to=name, indication=row.get("indication") or "",
-                    rationale=alt.get("rationale") or "",
-                    adr_note=alt.get("adr_note") or "",
-                    safer=False,
-                    reject_reason=f"Recheck failed: {type(e).__name__}",
-                ))
-                continue
-            if unresolved:
-                suggestions.append(AlternativeSuggestion(
-                    change_from=src, change_from_product=product,
-                    change_to=name, indication=row.get("indication") or "",
-                    rationale=alt.get("rationale") or "",
-                    adr_note=alt.get("adr_note") or "",
-                    safer=False,
-                    reject_reason=f"Could not resolve “{unresolved}” to a generic.",
-                ))
-                continue
-            leftover = alts.leftover_ddis(new_pairs)
-            safer = alts.is_safer(old_pairs, leftover)
-            reject = None
-            if not safer:
-                new_a = sum(1 for p in leftover if p.grade == Grade.A)
-                old_a = sum(1 for p in old_pairs if p.grade == Grade.A)
-                if any(p.category == Category.CONTRAINDICATED for p in leftover):
-                    reject = "Introduces a contraindicated pair with the rest of the list."
-                elif new_a > 0 and new_a >= old_a:
-                    reject = "Still has a Grade A interaction with the rest of the list."
-                elif alts.pair_burden(leftover) >= alts.pair_burden(old_pairs):
-                    reject = "Does not reduce the interaction burden vs the current pair."
-            suggestions.append(AlternativeSuggestion(
-                change_from=src,
-                change_from_product=product,
-                change_to=name,
-                change_to_components=comps,
-                indication=row.get("indication") or "",
-                rationale=alt.get("rationale") or "",
-                adr_note=alt.get("adr_note") or "",
-                safer=safer,
-                reject_reason=reject,
-                remaining_ddis=leftover,
+            jobs.append(_AltJob(
+                src=src, product=product, name=name, row=row, alt=alt,
+                old_pairs=old_pairs, remaining=remaining,
+                on_list=name.lower() in already,
             ))
+
+    # Each recheck is an independent normalize -> prefilter -> waterfall run.
+    # Fan them out under the same bound the waterfall uses, then decide in
+    # job order so suggestion ordering stays stable.
+    sem = asyncio.Semaphore(get_settings().pair_concurrency)
+
+    async def _recheck(job: _AltJob):
+        if job.on_list:
+            return None
+        async with sem:
+            return await _recheck_against_rest(job.name, job.remaining, ctx)
+
+    outcomes = await asyncio.gather(
+        *(_recheck(job) for job in jobs), return_exceptions=True)
+
+    for job, outcome in zip(jobs, outcomes):
+        if job.on_list:
+            suggestions.append(_rejected(
+                job.src, job.product, job.name, job.row, job.alt,
+                "Already on this prescription."))
+            continue
+        if isinstance(outcome, BaseException):
+            suggestions.append(_rejected(
+                job.src, job.product, job.name, job.row, job.alt,
+                f"Recheck failed: {type(outcome).__name__}"))
+            continue
+        new_pairs, comps, unresolved = outcome
+        if unresolved:
+            suggestions.append(_rejected(
+                job.src, job.product, job.name, job.row, job.alt,
+                f"Could not resolve \u201c{unresolved}\u201d to a generic."))
+            continue
+        leftover = alts.leftover_ddis(new_pairs)
+        safer = alts.is_safer(job.old_pairs, leftover)
+        reject = None
+        if not safer:
+            new_a = sum(1 for p in leftover if p.grade == Grade.A)
+            old_a = sum(1 for p in job.old_pairs if p.grade == Grade.A)
+            if any(p.category == Category.CONTRAINDICATED for p in leftover):
+                reject = "Introduces a contraindicated pair with the rest of the list."
+            elif new_a > 0 and new_a >= old_a:
+                reject = "Still has a Grade A interaction with the rest of the list."
+            elif alts.pair_burden(leftover) >= alts.pair_burden(job.old_pairs):
+                reject = "Does not reduce the interaction burden vs the current pair."
+        suggestions.append(AlternativeSuggestion(
+            change_from=job.src,
+            change_from_product=job.product,
+            change_to=job.name,
+            change_to_components=comps,
+            indication=job.row.get("indication") or "",
+            rationale=job.alt.get("rationale") or "",
+            adr_note=job.alt.get("adr_note") or "",
+            safer=safer,
+            reject_reason=reject,
+            remaining_ddis=leftover,
+        ))
 
     suggestions.sort(key=lambda s: (not s.safer, s.reject_reason is not None))
 

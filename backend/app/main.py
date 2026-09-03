@@ -2,7 +2,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .models import AlternativesRequest, AlternativesResponse, CheckRequest, CheckResponse
+from .models import (
+    AlternativesRequest,
+    AlternativesResponse,
+    CheckRequest,
+    CheckResponse,
+    OcrRequest,
+)
 from .pipeline import ocr, scrubber
 from .service import run_alternatives, run_check
 
@@ -33,9 +39,9 @@ async def alternatives(req: AlternativesRequest) -> AlternativesResponse:
 
 
 @app.post("/api/ocr")
-async def ocr_only(payload: dict) -> dict:
+async def ocr_only(req: OcrRequest) -> dict:
     """Standalone image -> scrubbed text (lets the UI preview before checking)."""
-    result = await ocr.extract_text(payload["image"])
+    result = await ocr.extract_text(req.image)
     scrubbed = scrubber.scrub_text(result["text"])
     return {"text": scrubbed.text, "engine": result["engine"],
             "confidence": result["confidence"],

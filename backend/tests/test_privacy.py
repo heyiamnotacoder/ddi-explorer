@@ -33,7 +33,7 @@ def _no_phi(text: str | None) -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_does_not_send_raw_patient_notes(monkeypatch):
+async def test_check_does_not_send_raw_patient_notes(monkeypatch, patch_seams):
     extract_seen: list[str] = []
     waterfall_seen: list[str | None] = []
 
@@ -62,10 +62,8 @@ async def test_check_does_not_send_raw_patient_notes(monkeypatch):
         waterfall_seen.append(patient_ctx)
         return []
 
-    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_waterfall)
 
     resp = await service.run_check(CheckRequest(
         text="warfarin 5 mg",
@@ -85,7 +83,7 @@ async def test_check_does_not_send_raw_patient_notes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_waterfall_never_gets_raw_request_fallback(monkeypatch):
+async def test_check_waterfall_never_gets_raw_request_fallback(monkeypatch, patch_seams):
     """Even if extract omits patient_context, use the scrubbed blob — not req."""
 
     async def fake_extract(text: str) -> dict:
@@ -107,10 +105,8 @@ async def test_check_waterfall_never_gets_raw_request_fallback(monkeypatch):
         seen.append(patient_ctx)
         return []
 
-    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_waterfall)
 
     await service.run_check(CheckRequest(
         text="warfarin 5 mg",
@@ -198,7 +194,7 @@ async def test_complete_scrubs_reasoning_prompts(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_web_resolve_query_never_includes_patient_phi(monkeypatch):
+async def test_web_resolve_query_never_includes_patient_phi(monkeypatch, patch_seams):
     searches: list[str] = []
     llm_seen: list[str] = []
 
@@ -229,13 +225,11 @@ async def test_web_resolve_query_never_includes_patient_phi(monkeypatch):
     async def fake_avoid(*_a, **_k):
         return []
 
-    monkeypatch.setattr(service.extract, "extract_drugs", fake_extract)
-    monkeypatch.setattr(service.norm, "normalize_drugs", fake_norm)
     monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
     monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
-    monkeypatch.setattr(service.prefilter, "check_known_pairs", fake_prefilter)
-    monkeypatch.setattr(service.waterfall, "evaluate_pairs", fake_waterfall)
-    monkeypatch.setattr(service.avoid_mod, "lookup", fake_avoid)
+    patch_seams(extract=fake_extract, normalize=fake_norm,
+                prefilter=fake_prefilter, waterfall=fake_waterfall,
+                avoid=fake_avoid)
 
     await service.run_check(CheckRequest(
         text="mysterybrand",

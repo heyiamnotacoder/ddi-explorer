@@ -49,19 +49,23 @@ export interface CheckResponse {
   disclaimer: string;
 }
 
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`API error ${r.status}`);
+  return r.json() as Promise<T>;
+}
+
 export async function checkInteractions(body: {
   text?: string;
   images?: string[];
   patient_context?: string;
   timing?: string;
 }): Promise<CheckResponse> {
-  const r = await fetch("/api/check", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`API error ${r.status}`);
-  return r.json();
+  return postJson<CheckResponse>("/api/check", body);
 }
 
 export type Importance = "anchor" | "controller" | "adjuvant";
@@ -103,11 +107,5 @@ export async function suggestAlternatives(body: {
   scrubbed_text?: string;
   avoid_with_medications?: AvoidWithItem[];
 }): Promise<AlternativesResponse> {
-  const r = await fetch("/api/alternatives", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`API error ${r.status}`);
-  return r.json();
+  return postJson<AlternativesResponse>("/api/alternatives", body);
 }
