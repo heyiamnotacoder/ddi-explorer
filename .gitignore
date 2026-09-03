@@ -24,3 +24,6 @@ dist-ssr/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Live eval cases live on a branch off main, never on main itself
+eval/
