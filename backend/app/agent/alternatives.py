@@ -18,7 +18,9 @@ from ..models import (
     NormalizedDrug,
     PairResult,
     ReplaceableDrug,
+    parent_drug,
 )
+from ..textmatch import has_word
 from . import llm
 
 # Word-boundary tokens. Short stems are omitted on purpose (ace, pam, na).
@@ -150,18 +152,13 @@ class Candidate:
     why: str = ""
 
 
-def _has_token(name: str, tokens: tuple[str, ...]) -> bool:
-    n = name.lower()
-    return any(re.search(rf"\b{re.escape(t)}\b", n) for t in tokens)
-
-
 def importance_of(name: str) -> Importance:
     """Conservative default: unknown names are controllers, not adjuvants."""
-    if _has_token(name, _ANCHOR):
+    if has_word(name, _ANCHOR):
         return Importance.ANCHOR
-    if _has_token(name, _ADJUVANT):
+    if has_word(name, _ADJUVANT):
         return Importance.ADJUVANT
-    if _has_token(name, _CONTROLLER):
+    if has_word(name, _CONTROLLER):
         return Importance.CONTROLLER
     n = name.lower()
     if re.search(r"\b(vitamin|calcium|iron|zinc|folate)\b", n):
@@ -185,9 +182,8 @@ def is_actionable(p: PairResult) -> bool:
 
 
 def is_major_or_contra(p: PairResult) -> bool:
+    """Severity gate, not an evidence gate — a moderate Grade A is not major."""
     if p.category == Category.CONTRAINDICATED:
-        return True
-    if p.grade == Grade.A:
         return True
     return (p.severity or "").lower() == "major"
 
@@ -197,14 +193,10 @@ def _pair_mentions(p: PairResult, name: str) -> bool:
     return any(d.lower() == n for d in p.drugs)
 
 
-def _parent_product(drugs: list[NormalizedDrug], component: str) -> str:
-    c = component.lower()
-    for d in drugs:
-        if any(x.lower() == c for x in d.components):
-            return d.input_name
-        if d.generic_name and d.generic_name.lower() == c:
-            return d.input_name
-    return component
+def parent_product(drugs: list[NormalizedDrug], component: str) -> str:
+    """Input product the ingredient came from; the ingredient itself if none."""
+    parent = parent_drug(drugs, component)
+    return parent.input_name if parent else component
 
 
 def _components_of(drugs: list[NormalizedDrug]) -> list[tuple[str, str]]:
@@ -312,21 +304,13 @@ def timing_notes(pairs: list[PairResult]) -> list[str]:
     return notes
 
 
+# Weights indexed by PairResult.priority(): contra, A, B, C, timing, none.
+_BURDEN_WEIGHTS = (100, 10, 5, 2, 1, 0)
+
+
 def pair_burden(pairs: list[PairResult]) -> int:
     """Higher = worse leftover interaction load (contra >> A >> B >> C >> timing)."""
-    score = 0
-    for p in pairs:
-        if p.category == Category.CONTRAINDICATED:
-            score += 100
-        elif p.grade == Grade.A:
-            score += 10
-        elif p.grade == Grade.B:
-            score += 5
-        elif p.grade == Grade.C:
-            score += 2
-        elif p.category == Category.TIMING:
-            score += 1
-    return score
+    return sum(_BURDEN_WEIGHTS[p.priority()] for p in pairs)
 
 
 def is_safer(old_pairs: list[PairResult], new_pairs: list[PairResult]) -> bool:

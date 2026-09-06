@@ -9,7 +9,14 @@ import httpx
 
 from ..agent import tools
 from ..config import get_settings
-from ..models import Category, Citation, Grade, NormalizedDrug, PairResult
+from ..models import (
+    Category,
+    Citation,
+    Grade,
+    NormalizedDrug,
+    PairResult,
+    SourceTier,
+)
 
 RXNAV_INTERACTION = "https://rxnav.nlm.nih.gov/REST/interaction/list.json"
 
@@ -75,7 +82,7 @@ async def check_known_pairs(
                 if r.status_code == 404:
                     data = {}
                 else:
-                    tools._raise_http(r, "rxnav")
+                    tools.raise_for_tool_status(r, "rxnav")
                     data = r.json()
             except (httpx.HTTPError, tools.ToolRateLimit):
                 data = {}
@@ -105,7 +112,7 @@ async def check_known_pairs(
                         summary=desc,
                         citations=[Citation(source="rxnav", title="RxNav Drug Interaction (NLM)",
                                             url="https://lhncbc.nlm.nih.gov/RxNav/APIs")],
-                        source_tier="local",
+                        source_tier=SourceTier.LOCAL,
                     ))
                     resolved_names.add(names)
 

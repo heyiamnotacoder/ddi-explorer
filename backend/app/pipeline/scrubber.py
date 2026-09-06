@@ -88,8 +88,8 @@ def _looks_like_drug(text: str, start: int, end: int) -> bool:
     candidates = {span, span_core}
     # (a) dataset match on any candidate
     try:
-        from .normalize import _indian_index  # lazy; avoids import cycle
-        index = _indian_index()
+        from .normalize import indian_index  # lazy; avoids import cycle
+        index = indian_index()
         if index:
             for cand in candidates:
                 if not cand:

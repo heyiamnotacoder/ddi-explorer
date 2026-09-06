@@ -26,6 +26,7 @@ from .models import (
     NormalizedDrug,
     PairResult,
     ReplaceableDrug,
+    SourceTier,
 )
 from .pipeline import avoid as avoid_mod
 from .pipeline import normalize as norm
@@ -67,7 +68,8 @@ def _patient_ctx_for_llm(extracted: dict, scrubbed_blob: str) -> str | None:
     return scrubber.for_reasoning_llm(raw)
 
 
-def _opt_str(value: object) -> str | None:
+def _extract_field(value: object) -> str | None:
+    """One extract field as text. Null-ish placeholders become None."""
     if value is None or isinstance(value, bool):
         return None
     s = str(value).strip()
@@ -84,8 +86,8 @@ def _attach_extract_fields(
     out: list[NormalizedDrug] = []
     for i, n in enumerate(normalized):
         src = extracted_drugs[i] if i < len(extracted_drugs) else {}
-        dose = _opt_str(src.get("dose"))
-        schedule = _opt_str(src.get("timing"))
+        dose = _extract_field(src.get("dose"))
+        schedule = _extract_field(src.get("timing"))
         if dose or schedule:
             n = n.model_copy(update={"dose": dose, "schedule": schedule})
         out.append(n)
@@ -157,7 +159,10 @@ async def run_check(req: CheckRequest) -> CheckResponse:
         drugs=normalized, patient_ctx=patient_ctx,
     )
     banner = [p for p in all_pairs if p.category == Category.CONTRAINDICATED]
-    insufficient = [p.drugs for p in all_pairs if p.source_tier == "insufficient"]
+    insufficient = [
+        p.drugs for p in all_pairs
+        if p.source_tier == SourceTier.INSUFFICIENT
+    ]
 
     avoid_with = await avoid_mod.lookup(
         extracted.get("non_drugs") or [],
@@ -221,7 +226,7 @@ async def _recheck_against_rest(
 class _AltJob:
     """One (drug to change, proposed alternative) candidate awaiting recheck."""
     src: str
-    product: str | None
+    product: str
     name: str
     row: dict
     alt: dict
@@ -230,17 +235,14 @@ class _AltJob:
     on_list: bool
 
 
-def _rejected(
-    src: str, product: str | None, name: str,
-    row: dict, alt: dict, reason: str,
-) -> AlternativeSuggestion:
+def _rejected(job: _AltJob, reason: str) -> AlternativeSuggestion:
     """A substitution that was considered and ruled out. No components: a
     rejected candidate was never resolved against the rest of the list."""
     return AlternativeSuggestion(
-        change_from=src, change_from_product=product,
-        change_to=name, indication=row.get("indication") or "",
-        rationale=alt.get("rationale") or "",
-        adr_note=alt.get("adr_note") or "",
+        change_from=job.src, change_from_product=job.product,
+        change_to=job.name, indication=job.row.get("indication") or "",
+        rationale=job.alt.get("rationale") or "",
+        adr_note=job.alt.get("adr_note") or "",
         safer=False,
         reject_reason=reason,
     )
@@ -291,7 +293,7 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
         if not src:
             continue
         src_l = src.lower()
-        product = alts._parent_product(req.normalized_drugs, src)
+        product = alts.parent_product(req.normalized_drugs, src)
         old_pairs = _pairs_involving(req.pairs, {src_l})
         remaining: list[NormalizedDrug] = []
         for item in remaining_base:
@@ -333,20 +335,16 @@ async def run_alternatives(req: AlternativesRequest) -> AlternativesResponse:
 
     for job, outcome in zip(jobs, outcomes):
         if job.on_list:
-            suggestions.append(_rejected(
-                job.src, job.product, job.name, job.row, job.alt,
-                "Already on this prescription."))
+            suggestions.append(_rejected(job, "Already on this prescription."))
             continue
         if isinstance(outcome, BaseException):
             suggestions.append(_rejected(
-                job.src, job.product, job.name, job.row, job.alt,
-                f"Recheck failed: {type(outcome).__name__}"))
+                job, f"Recheck failed: {type(outcome).__name__}"))
             continue
         new_pairs, comps, unresolved = outcome
         if unresolved:
             suggestions.append(_rejected(
-                job.src, job.product, job.name, job.row, job.alt,
-                f"Could not resolve \u201c{unresolved}\u201d to a generic."))
+                job, f"Could not resolve \u201c{unresolved}\u201d to a generic."))
             continue
         leftover = alts.leftover_ddis(new_pairs)
         safer = alts.is_safer(job.old_pairs, leftover)

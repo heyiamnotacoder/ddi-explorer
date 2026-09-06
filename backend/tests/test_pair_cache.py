@@ -88,6 +88,11 @@ async def test_cache_hit_same_grade_no_second_fetch(monkeypatch):
     assert [c.identifier for c in second.citations] == ["set-1"]
 
 
+def _cache_blob() -> str:
+    return json.dumps(
+        [p.model_dump(mode="json") for p in pair_cache.entries()], default=str)
+
+
 @pytest.mark.asyncio
 async def test_cache_does_not_store_patient_text(monkeypatch):
     async def fake_fda(a, b):
@@ -105,14 +110,13 @@ async def test_cache_does_not_store_patient_text(monkeypatch):
     )
     # Label Grade A skips the synthesizer; overlay (service) adds notes later.
     assert live.patient_specific_note is None
-    blob = pair_cache.payload_text()
+    # A result graded WITH patient context is never stored: summary,
+    # severe_if, and dose_condition can all carry that patient.
+    blob = _cache_blob()
     assert PHI not in blob
     assert "9876543210" not in blob
     assert "Ramesh" not in blob
-    cached = pair_cache.get("warfarin", "amiodarone")
-    assert cached is not None
-    assert cached.patient_specific_note is None
-    assert cached.grade == Grade.A
+    assert pair_cache.get("warfarin", "amiodarone") is None
 
 
 def test_put_strips_patient_note_and_skips_errors():
@@ -129,7 +133,7 @@ def test_put_strips_patient_note_and_skips_errors():
     assert hit is not None
     assert hit.grade == Grade.A
     assert hit.patient_specific_note is None
-    assert PHI not in pair_cache.payload_text()
+    assert PHI not in _cache_blob()
 
     pair_cache.put(PairResult(
         drugs=("foo", "bar"),
@@ -209,5 +213,30 @@ async def test_429_is_not_cached_so_retry_hunts(monkeypatch):
 def test_raise_http_429_is_tool_rate_limit():
     r = httpx.Response(429, request=httpx.Request("GET", "https://api.fda.gov/"))
     with pytest.raises(tools.ToolRateLimit) as ei:
-        tools._raise_http(r, "openfda")
+        tools.raise_for_tool_status(r, "openfda")
     assert ei.value.tool == "openfda"
+
+
+@pytest.mark.asyncio
+async def test_patient_context_request_does_not_read_a_context_free_cache_hit(
+        monkeypatch):
+    """Patient-specific grading is never skipped by a cache hit."""
+    calls: list[tuple[str, str]] = []
+
+    async def fake_fda(a, b):
+        calls.append((a, b))
+        return [{
+            "setid": "set-1", "title": "label",
+            "url": "https://dailymed/set-1",
+            "interactions_text": f"Concomitant {b} with {a}.",
+        }]
+
+    _patch_fda(monkeypatch, fake_fda)
+    _patch_synth(monkeypatch, _grade_a())
+
+    await evaluate_pair("warfarin", "amiodarone")
+    assert len(calls) == 1
+    await evaluate_pair("warfarin", "amiodarone")
+    assert len(calls) == 1  # context-free repeat is served from cache
+    await evaluate_pair("warfarin", "amiodarone", patient_context="CrCl 28")
+    assert len(calls) == 2  # context re-hunts instead of replaying a stale grade

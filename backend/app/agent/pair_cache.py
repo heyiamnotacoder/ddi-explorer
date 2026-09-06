@@ -1,15 +1,15 @@
 """Process-local cache of waterfall pair results.
 
-Keyed by unordered component names. Never stores patient notes or request
-text. Error-tier results are not cached so a later retry can hunt again.
+Keyed by unordered component names. Callers only store results graded
+WITHOUT patient context, so no field can carry patient text. Error-tier
+results are not cached so a later retry can hunt again.
 """
 from __future__ import annotations
 
-import json
 from collections import OrderedDict
 from threading import Lock
 
-from ..models import PairResult
+from ..models import PairResult, SourceTier
 
 MAX_ENTRIES = 256
 
@@ -32,11 +32,13 @@ def get(drug_a: str, drug_b: str) -> PairResult | None:
 
 
 def put(result: PairResult) -> None:
-    if result.source_tier == "error":
+    if result.source_tier == SourceTier.ERROR:
         return
     a, b = result.drugs
     if not a or not b:
         return
+    # Belt and braces: the caller already refuses to store a context-graded
+    # result, so this field must be empty by construction.
     stored = result.model_copy(
         deep=True,
         update={"patient_specific_note": None},
@@ -54,10 +56,7 @@ def clear() -> None:
         _store.clear()
 
 
-def payload_text() -> str:
-    """Serialized values only (no keys beyond drug names on the result)."""
+def entries() -> list[PairResult]:
+    """Snapshot of what is cached. For tests and privacy assertions."""
     with _lock:
-        return json.dumps(
-            [v.model_dump(mode="json") for v in _store.values()],
-            default=str,
-        )
+        return [v.model_copy(deep=True) for v in _store.values()]

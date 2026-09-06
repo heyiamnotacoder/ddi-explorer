@@ -265,3 +265,63 @@ async def test_fetched_page_can_be_cited_as_grade_c(monkeypatch):
     assert [c.url for c in result.citations] == ["https://example.com/case"]
     assert all(c.identifier is None or c.identifier != "https://example.com/case"
                for c in result.citations)
+
+
+@pytest.mark.asyncio
+async def test_tier3_negative_verdict_is_not_rewritten_into_grade_c(monkeypatch):
+    """A weak-evidence pool the synthesizer reads as negative stays ungraded.
+
+    Disclosing a conflict must never manufacture one: only a positive tier-3
+    finding earns Grade C.
+    """
+    _patch_empty_fda_ct(monkeypatch)
+
+    async def fake_pubmed(*_a, **_k):
+        return [CASE]
+
+    async def fake_search(*_a, **_k):
+        return []
+
+    async def fake_complete(messages, **_k):
+        return json.dumps({
+            "verdict": "none",
+            "summary": "The case report describes a different mechanism.",
+            "cited": ["333"],
+            "category": "none",
+        })
+
+    monkeypatch.setattr("app.agent.waterfall.tools.pubmed_search", fake_pubmed)
+    monkeypatch.setattr("app.agent.waterfall.tools.web_search", fake_search)
+    monkeypatch.setattr("app.agent.waterfall.llm.complete", fake_complete)
+
+    result = await evaluate_pair("warfarin", "amiodarone")
+    assert result.grade is None
+    assert result.category == Category.NONE
+    assert result.evidence_conflict is None
+
+
+@pytest.mark.asyncio
+async def test_tier3_insufficient_verdict_is_not_rewritten(monkeypatch):
+    _patch_empty_fda_ct(monkeypatch)
+
+    async def fake_pubmed(*_a, **_k):
+        return [CASE]
+
+    async def fake_search(*_a, **_k):
+        return []
+
+    async def fake_complete(messages, **_k):
+        return json.dumps({
+            "verdict": "insufficient",
+            "summary": "Records retrieved do not answer the question.",
+            "cited": ["333"],
+        })
+
+    monkeypatch.setattr("app.agent.waterfall.tools.pubmed_search", fake_pubmed)
+    monkeypatch.setattr("app.agent.waterfall.tools.web_search", fake_search)
+    monkeypatch.setattr("app.agent.waterfall.llm.complete", fake_complete)
+
+    result = await evaluate_pair("warfarin", "amiodarone")
+    assert result.grade is None
+    assert result.source_tier == "insufficient"
+    assert result.evidence_conflict is None

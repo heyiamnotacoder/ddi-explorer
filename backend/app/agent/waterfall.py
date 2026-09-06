@@ -12,9 +12,10 @@
 Anti-hallucination rule: the LLM may ONLY cite records handed to it by a
 tool in this run. No retrieved record -> no citation -> no claim.
 
-A 429 from any evidence tool marks that pair `source_tier="error"` (not
-"no DDI"). Identical component pairs reuse a process-local cache; the
-cache never stores patient notes or error-tier rows.
+A 429 from any evidence tool marks that pair as the error tier (not
+"no DDI"). Identical component pairs reuse a process-local cache, which is
+skipped entirely when the request carries patient context, and never holds
+error-tier rows.
 """
 from __future__ import annotations
 
@@ -23,8 +24,9 @@ import json
 import logging
 import re
 
+from ..citations import all_cited_mapped, citations_from
 from ..config import get_settings
-from ..models import Category, Citation, Grade, PairResult
+from ..models import Category, Citation, Grade, PairResult, SourceTier
 from . import llm, pair_cache, tools
 
 logger = logging.getLogger(__name__)
@@ -86,53 +88,6 @@ verdict="insufficient": records retrieved but they do not answer the question.
 Only verdict="interaction" earns a grade."""
 
 
-def _cited_list(cited) -> list:
-    if cited is None:
-        return []
-    if isinstance(cited, str):
-        return [cited] if cited.strip() else []
-    if isinstance(cited, (list, tuple, set)):
-        return list(cited)
-    return [cited]
-
-
-def _record_ids(pool: list[dict]) -> set[str]:
-    ids: set[str] = set()
-    for rec in pool:
-        for k in ("pmid", "nct_id", "setid", "url"):
-            v = rec.get(k)
-            if v:
-                ids.add(str(v).strip().lower())
-    return ids
-
-
-def _all_cited_mapped(cited, pool: list[dict]) -> bool:
-    """False if the synthesizer named any identifier the tools did not retrieve."""
-    ids = _record_ids(pool)
-    for c in _cited_list(cited):
-        s = str(c).strip().lower()
-        if s and s not in ids:
-            return False
-    return True
-
-
-def _citations_from(cited, pool: list[dict], source: str) -> list[Citation]:
-    """Map LLM-cited identifiers back to REAL retrieved records only."""
-    out = []
-    cited_norm = {str(c).strip().lower() for c in _cited_list(cited)} - {""}
-    for rec in pool:
-        ids = {str(rec.get(k, "")).strip().lower()
-               for k in ("pmid", "nct_id", "setid", "url")} - {""}
-        if ids & cited_norm:
-            out.append(Citation(
-                source=source,
-                title=rec.get("title", f"{source} record"),
-                url=rec.get("url"),
-                identifier=rec.get("pmid") or rec.get("nct_id") or rec.get("setid"),
-            ))
-    return out
-
-
 async def _synthesize(drug_a: str, drug_b: str, tier_label: str,
                       evidence: list[dict], patient_context: str | None) -> dict:
     user = (
@@ -148,7 +103,7 @@ async def _synthesize(drug_a: str, drug_b: str, tier_label: str,
 
 
 def _verdict_result(a: str, b: str, s: dict, grade: Grade | None,
-                    citations: list[Citation], tier: str,
+                    citations: list[Citation], tier: SourceTier,
                     *, pool: list[dict] | None = None) -> PairResult:
     """Apply the verdict: 'none'/'insufficient' never carry a grade.
 
@@ -162,7 +117,7 @@ def _verdict_result(a: str, b: str, s: dict, grade: Grade | None,
         verdict = "insufficient"
     if verdict == "interaction":
         cited = s.get("cited", [])
-        if not citations or (pool is not None and not _all_cited_mapped(cited, pool)):
+        if not citations or (pool is not None and not all_cited_mapped(cited, pool)):
             verdict = "insufficient"
     if verdict in ("none", "insufficient"):
         return PairResult(
@@ -171,7 +126,8 @@ def _verdict_result(a: str, b: str, s: dict, grade: Grade | None,
             summary=(s.get("summary", "") or
                      ("No clinically meaningful interaction per retrieved evidence."
                       if verdict == "none" else "Insufficient evidence to determine.")),
-            citations=citations, source_tier=tier if verdict == "none" else "insufficient",
+            citations=citations,
+            source_tier=tier if verdict == "none" else SourceTier.INSUFFICIENT,
         )
     return PairResult(
         drugs=(a, b), grade=grade,
@@ -224,11 +180,6 @@ def split_pubmed(pubs: list[dict]) -> tuple[list[dict], list[dict]]:
     return strong, weak
 
 
-async def _fetched_web(hits: list[dict]) -> list[dict]:
-    """Fetch search hits. Unfetched URLs never enter the citation pool."""
-    return await tools.fetch_web_pages(hits, _MAX_WEB_FETCHES)
-
-
 def _with_conflict(result: PairResult, text: str) -> PairResult:
     if result.grade != Grade.C or result.evidence_conflict:
         return result
@@ -240,37 +191,37 @@ def _none_pair(a: str, b: str) -> PairResult:
         drugs=(a, b), grade=None, category=Category.NONE,
         summary=f"No documented interaction found between {a} and {b} "
                 f"(checked labeling, trials, and literature).",
-        source_tier="none",
+        source_tier=SourceTier.NONE,
     )
 
 
 def _error_pair(a: str, b: str, reason: str) -> PairResult:
     return PairResult(
         drugs=(a, b), grade=None, category=Category.NONE,
-        summary=reason, source_tier="error",
+        summary=reason, source_tier=SourceTier.ERROR,
     )
 
 
 def _label_text_mentions_pair(text: str, a: str, b: str) -> bool:
-    aliases = tools._label_aliases(a) + tools._label_aliases(b)
-    return tools._first_mention(text or "", aliases) is not None
+    aliases = tools.label_aliases(a) + tools.label_aliases(b)
+    return tools.first_mention(text or "", aliases) is not None
 
 
 def _partner_aliases_for_rec(rec: dict, a: str, b: str) -> list[str]:
     subject = (rec.get("subject_drug") or "").strip().lower()
     if subject == a.lower():
-        return tools._label_aliases(b)
+        return tools.label_aliases(b)
     if subject == b.lower():
-        return tools._label_aliases(a)
-    return tools._label_aliases(a) + tools._label_aliases(b)
+        return tools.label_aliases(a)
+    return tools.label_aliases(a) + tools.label_aliases(b)
 
 
 def _label_role(rec: dict, a: str, b: str) -> str | None:
     """Map one label hit to contraindicated, interaction, or drop (fall through)."""
     if not rec.get("setid"):
         return None
-    names = tools._ingredient_names_from(rec)
-    if tools._spl_contains_both_pair_members(names, a, b):
+    names = tools.ingredient_names_from(rec)
+    if tools.spl_contains_both_pair_members(names, a, b):
         return None
     di = rec.get("di_text")
     ci = rec.get("ci_text")
@@ -282,14 +233,14 @@ def _label_role(rec: dict, a: str, b: str) -> str | None:
     if not _label_text_mentions_pair(mention, a, b):
         return None
     aliases = _partner_aliases_for_rec(rec, a, b)
-    if tools._pair_scoped_contraindication(ci or "", aliases) or (
-            tools._pair_scoped_contraindication(di or "", aliases)):
+    if tools.pair_scoped_contraindication(ci or "", aliases) or (
+            tools.pair_scoped_contraindication(di or "", aliases)):
         return "contraindicated"
     if not di or not _label_text_mentions_pair(di, a, b):
         return None
-    if tools._negative_pair_mention(di, aliases):
+    if tools.negative_pair_mention(di, aliases):
         return None
-    if tools._is_ingredient_colist(di, aliases) and not tools._has_interaction_language(di):
+    if tools.is_ingredient_colist(di, aliases) and not tools.has_interaction_language(di):
         return None
     return "interaction"
 
@@ -316,7 +267,7 @@ def _pair_from_labels(a: str, b: str, fda: list[dict]) -> PairResult | None:
             contra = True
     if not usable:
         return None
-    cites = _citations_from(
+    cites = citations_from(
         [str(rec["setid"]) for rec in usable], usable, "openfda")
     if not cites:
         return None
@@ -329,21 +280,31 @@ def _pair_from_labels(a: str, b: str, fda: list[dict]) -> PairResult | None:
         severity="major" if contra else "moderate",
         summary=blob[:800],
         citations=cites,
-        source_tier="openfda",
+        source_tier=SourceTier.OPENFDA,
     )
 
 
 async def evaluate_pair(drug_a: str, drug_b: str,
                         patient_context: str | None = None) -> PairResult:
+    """Grade one pair. Patient context bypasses the cache in both directions.
+
+    A synthesis run with patient notes in the prompt bleeds that patient into
+    `summary`, `severe_if`, and `dose_condition` — not just
+    `patient_specific_note` — so such a result is never stored, and a request
+    that carries context never reads a result graded for nobody.
+    """
     a, b = drug_a.lower(), drug_b.lower()
-    hit = pair_cache.get(a, b)
-    if hit is not None:
-        return hit.model_copy(update={"drugs": (a, b)})
+    cacheable = not (patient_context or "").strip()
+    if cacheable:
+        hit = pair_cache.get(a, b)
+        if hit is not None:
+            return hit.model_copy(update={"drugs": (a, b)})
     try:
         result = await _hunt_pair(a, b, patient_context)
     except tools.ToolRateLimit as e:
         return _error_pair(a, b, f"Evidence tool rate-limited ({e.tool}).")
-    pair_cache.put(result)
+    if cacheable:
+        pair_cache.put(result)
     return result
 
 
@@ -371,16 +332,17 @@ async def _hunt_pair(a: str, b: str, patient_context: str | None) -> PairResult:
             strong, patient_context)
         b_result = _verdict_result(
             a, b, s, Grade.B,
-            (_citations_from(s.get("cited", []), strong_pubs, "pubmed")
-             + _citations_from(s.get("cited", []), trials, "clinicaltrials")),
-            "pubmed_ct", pool=strong)
+            (citations_from(s.get("cited", []), strong_pubs, "pubmed")
+             + citations_from(s.get("cited", []), trials, "clinicaltrials")),
+            SourceTier.PUBMED_CT, pool=strong)
         if b_result.grade == Grade.B:
             return b_result
 
     # ---- Tier 3: weak evidence (case reports + fetched pages only) --------
     web_hits = await tools.web_search(
         f"{a} {b} drug interaction case report")
-    fetched = await _fetched_web(web_hits)
+    # Unfetched URLs never enter the citation pool.
+    fetched = await tools.fetch_web_pages(web_hits, _MAX_WEB_FETCHES)
     weak_only = list(weak_pubs) + list(fetched)
     if not weak_only:
         return b_result if b_result is not None else _none_pair(a, b)
@@ -398,23 +360,18 @@ async def _hunt_pair(a: str, b: str, patient_context: str | None) -> PairResult:
         weak_pool, patient_context)
     cited = s.get("cited", [])
     cites = (
-        _citations_from(cited, pubs, "pubmed")
-        + _citations_from(cited, trials, "clinicaltrials")
-        + _citations_from(cited, fetched, "web")
+        citations_from(cited, pubs, "pubmed")
+        + citations_from(cited, trials, "clinicaltrials")
+        + citations_from(cited, fetched, "web")
     )
-    conflict_text = _CONFLICT_NEGATIVE if strong else _CONFLICT_ABSENT
-    disclose = not strong or (b_result is not None and b_result.grade != Grade.B)
-    if disclose and cites and s.get("verdict") != "interaction":
-        s = {
-            **s,
-            "verdict": "interaction",
-            "summary": s.get("summary") or conflict_text,
-            "evidence_conflict": s.get("evidence_conflict") or conflict_text,
-            "category": s.get("category") or "interaction",
-        }
     result = _verdict_result(
-        a, b, s, Grade.C, cites, "web", pool=weak_pool)
-    if disclose:
+        a, b, s, Grade.C, cites, SourceTier.WEB, pool=weak_pool)
+    # A conflict is disclosed on top of a positive weak-evidence finding. A
+    # "none"/"insufficient" verdict is never rewritten into a graded
+    # interaction — that would be the silent extrapolation the grades exist
+    # to prevent.
+    if result.grade == Grade.C:
+        conflict_text = _CONFLICT_NEGATIVE if strong else _CONFLICT_ABSENT
         result = _with_conflict(result, conflict_text)
     return result
 

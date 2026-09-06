@@ -59,7 +59,7 @@ def test_window_keeps_partner_past_char_3000():
         ],
     }
     assert "clarithromycin" not in prefix[:3000].lower()
-    hit = tools._label_hit(rec, "atorvastatin", tools._label_aliases("clarithromycin"))
+    hit = tools._label_hit(rec, "atorvastatin", tools.label_aliases("clarithromycin"))
     assert hit is not None
     assert hit["setid"] == "atorva-1"
     assert "clarithromycin" in hit["interactions_text"].lower()
@@ -71,7 +71,7 @@ def test_window_without_partner_is_not_a_hit():
         "set_id": "toc-1",
         "drug_interactions": ["HIGHLIGHTS see full prescribing information. " * 80],
     }
-    assert tools._label_hit(rec, "atorvastatin", tools._label_aliases("clarithromycin")) is None
+    assert tools._label_hit(rec, "atorvastatin", tools.label_aliases("clarithromycin")) is None
 
 
 def test_boxed_warning_field_is_a_hit():
@@ -79,7 +79,7 @@ def test_boxed_warning_field_is_a_hit():
         "set_id": "box-1",
         "boxed_warning": ["Concomitant clarithromycin increases myopathy risk."],
     }
-    hit = tools._label_hit(rec, "atorvastatin", tools._label_aliases("clarithromycin"))
+    hit = tools._label_hit(rec, "atorvastatin", tools.label_aliases("clarithromycin"))
     assert hit is not None
     assert "clarithromycin" in hit["interactions_text"].lower()
 
@@ -93,7 +93,7 @@ def test_contraindications_field_is_a_hit():
         "drug_interactions": ["See contraindications."],
     }
     hit = tools._label_hit(
-        rec, "sildenafil", tools._label_aliases("isosorbide mononitrate"))
+        rec, "sildenafil", tools.label_aliases("isosorbide mononitrate"))
     assert hit is not None
     assert "nitrate" in hit["interactions_text"].lower()
     assert hit["label_contraindicated"] is True
@@ -112,10 +112,10 @@ def test_twynsta_negative_hctz_mention_is_not_a_hit():
             "simvastatin, hydrochlorothiazide, warfarin, or ibuprofen."
         ],
     }
-    assert not tools._spl_contains_both_pair_members(
-        tools._ingredient_names_from(rec), "telmisartan", "hydrochlorothiazide")
+    assert not tools.spl_contains_both_pair_members(
+        tools.ingredient_names_from(rec), "telmisartan", "hydrochlorothiazide")
     assert tools._label_hit(
-        rec, "telmisartan", tools._label_aliases("hydrochlorothiazide"),
+        rec, "telmisartan", tools.label_aliases("hydrochlorothiazide"),
         partner="hydrochlorothiazide") is None
 
 
@@ -134,10 +134,10 @@ def test_combo_spl_generic_name_is_not_a_hit():
             "Hypersensitivity to sitagliptin. Do not use sitagliptin if allergic."
         ],
     }
-    assert tools._spl_contains_both_pair_members(
-        tools._ingredient_names_from(rec), "metformin", "sitagliptin")
+    assert tools.spl_contains_both_pair_members(
+        tools.ingredient_names_from(rec), "metformin", "sitagliptin")
     assert tools._label_hit(
-        rec, "metformin", tools._label_aliases("sitagliptin"),
+        rec, "metformin", tools.label_aliases("sitagliptin"),
         partner="sitagliptin") is None
 
 
@@ -146,18 +146,18 @@ def test_hypersensitivity_do_not_use_is_not_pair_scoped_ci():
         "Do not use MICARDIS HCT in patients with known hypersensitivity "
         "to telmisartan or hydrochlorothiazide."
     )
-    assert not tools._pair_scoped_contraindication(
-        text, tools._label_aliases("telmisartan"))
-    assert tools._pair_scoped_contraindication(
+    assert not tools.pair_scoped_contraindication(
+        text, tools.label_aliases("telmisartan"))
+    assert tools.pair_scoped_contraindication(
         "Do not use with nitrates.",
-        tools._label_aliases("isosorbide mononitrate"))
-    assert tools._pair_scoped_contraindication(
+        tools.label_aliases("isosorbide mononitrate"))
+    assert tools.pair_scoped_contraindication(
         "Do not use with organic nitrates in any form.",
-        tools._label_aliases("isosorbide mononitrate"))
-    assert tools._pair_scoped_contraindication(
+        tools.label_aliases("isosorbide mononitrate"))
+    assert tools.pair_scoped_contraindication(
         "ZOLOFT is contraindicated with MAOIs including phenelzine. "
         "Do not use with phenelzine.",
-        tools._label_aliases("phenelzine"))
+        tools.label_aliases("phenelzine"))
 
 
 def test_unrelated_ci_blob_is_not_pair_scoped():
@@ -171,11 +171,11 @@ def test_unrelated_ci_blob_is_not_pair_scoped():
         ],
     }
     hit = tools._label_hit(
-        rec, "metformin", tools._label_aliases("sitagliptin"))
+        rec, "metformin", tools.label_aliases("sitagliptin"))
     assert hit is not None
     assert hit["label_contraindicated"] is False
-    assert tools._is_ingredient_colist(
-        hit["di_text"] or "", tools._label_aliases("sitagliptin"))
+    assert tools.is_ingredient_colist(
+        hit["di_text"] or "", tools.label_aliases("sitagliptin"))
 
 
 def test_pair_scoped_ci_on_pde5_nitrate():
@@ -187,20 +187,20 @@ def test_pair_scoped_ci_on_pde5_nitrate():
         ],
     }
     hit = tools._label_hit(
-        rec, "sildenafil", tools._label_aliases("isosorbide mononitrate"))
+        rec, "sildenafil", tools.label_aliases("isosorbide mononitrate"))
     assert hit is not None
     assert hit["label_contraindicated"] is True
 
 
 def test_inn_usan_spelling_aliases():
-    assert "acetaminophen" in tools._label_aliases("paracetamol")
-    assert "paracetamol" in tools._label_aliases("acetaminophen")
-    assert "amoxicillin" in tools._label_aliases("amoxycillin")
-    assert "amoxycillin" in tools._label_aliases("amoxicillin")
+    assert "acetaminophen" in tools.label_aliases("paracetamol")
+    assert "paracetamol" in tools.label_aliases("acetaminophen")
+    assert "amoxicillin" in tools.label_aliases("amoxycillin")
+    assert "amoxycillin" in tools.label_aliases("amoxicillin")
 
 
 def test_rifampicin_aliases_include_rifampin():
-    aliases = tools._label_aliases("rifampicin")
+    aliases = tools.label_aliases("rifampicin")
     assert "rifampin" in aliases
     assert "rifampicin" in aliases
     rec = {
@@ -214,7 +214,7 @@ def test_rifampicin_aliases_include_rifampin():
 
 
 def test_isosorbide_aliases_include_nitrates():
-    aliases = tools._label_aliases("isosorbide mononitrate")
+    aliases = tools.label_aliases("isosorbide mononitrate")
     assert "nitrates" in aliases
     assert "nitrate" in aliases
 

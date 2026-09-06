@@ -4,7 +4,7 @@ import pytest
 from app.models import NormalizedDrug
 from app.pipeline import normalize as norm
 from app.pipeline.normalize import (
-    _bare_name,
+    bare_name,
     _lookup_indian,
     _pick_rxnav_candidate,
     split_components,
@@ -83,13 +83,13 @@ def test_five_plain_names_make_five_singleton_components():
 
 
 def test_bare_name_strips_strength_keeps_brand_numbers():
-    assert _bare_name("amilodipine 20mg") == "amilodipine"
-    assert _bare_name("levoceterizine 5 mg") == "levoceterizine"
-    assert _bare_name("warfar 100 mg") == "warfar"
-    assert _bare_name("omeprazole 5 mg") == "omeprazole"
+    assert bare_name("amilodipine 20mg") == "amilodipine"
+    assert bare_name("levoceterizine 5 mg") == "levoceterizine"
+    assert bare_name("warfar 100 mg") == "warfar"
+    assert bare_name("omeprazole 5 mg") == "omeprazole"
     # Indian brands often encode strength without a unit
-    assert _bare_name("dolo 650") == "dolo 650"
-    assert _bare_name("telma 40") == "telma 40"
+    assert bare_name("dolo 650") == "dolo 650"
+    assert bare_name("telma 40") == "telma 40"
 
 
 def test_screenshot_typos_with_doses_are_single_generics():

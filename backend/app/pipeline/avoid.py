@@ -10,9 +10,10 @@ import asyncio
 import re
 
 from ..agent import tools
-from ..agent.waterfall import _citations_from
+from ..citations import citations_from
 from ..config import get_settings
 from ..models import AvoidWithItem, NormalizedDrug
+from ..textmatch import contains_any_term
 
 EMPTY_NOTE = (
     "No labeled interaction found between {substance} and the listed medications."
@@ -52,16 +53,7 @@ def _terms(substance: str) -> tuple[str, ...]:
 
 
 def _mentions(text: str, terms: tuple[str, ...]) -> bool:
-    if not text or not terms:
-        return False
-    low = text.lower()
-    for t in terms:
-        t = t.lower()
-        if not t:
-            continue
-        if re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", low):
-            return True
-    return False
+    return contains_any_term(text, terms)
 
 
 def _snippet(text: str, terms: tuple[str, ...], limit: int = 400) -> str | None:
@@ -183,7 +175,7 @@ async def lookup(
             ident = rec.get("setid") or rec.get("url")
             if ident:
                 cited_ids.append(str(ident))
-        cites = _citations_from(cited_ids, pool, "openfda")
+        cites = citations_from(cited_ids, pool, "openfda")
         if not cites:
             out.append(_empty(substance))
             continue

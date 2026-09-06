@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from ..config import get_settings
+from ..textmatch import term_pattern
 
 # Two retries after the first 429. Total sleep stays well under HTTP_TIMEOUT (30s).
 _429_RETRIES = 2
@@ -39,7 +40,7 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=get_settings().http_timeout)
 
 
-def _raise_http(r: httpx.Response, tool: str) -> None:
+def raise_for_tool_status(r: httpx.Response, tool: str) -> None:
     if r.status_code == 429:
         raise ToolRateLimit(tool)
     r.raise_for_status()
@@ -75,7 +76,7 @@ async def request_with_retry(
         code = r.status_code
         if code == 429:
             if n_429 >= _429_RETRIES or slept >= _MAX_SLEEP_S:
-                _raise_http(r, tool)
+                raise_for_tool_status(r, tool)
             n_429 += 1
             slept = await _sleep_backoff(n_429 - 1, slept)
             continue
@@ -151,7 +152,7 @@ def _clean_term(name: str) -> str:
     return (name or "").replace('"', "").strip()
 
 
-def _label_aliases(name: str) -> list[str]:
+def label_aliases(name: str) -> list[str]:
     """INN/USAN plus nitrate / PDE-5 class terms for label search and windows."""
     raw = _clean_term(name)
     if not raw:
@@ -211,17 +212,13 @@ def _join_fields(rec: dict, fields: tuple[str, ...]) -> str:
     return " ".join(parts)
 
 
-def _alias_pattern(alias: str) -> re.Pattern[str]:
-    return re.compile(rf"(?<![a-z0-9]){re.escape(alias.lower())}(?![a-z0-9])")
-
-
-def _first_mention(text: str, aliases: list[str]) -> int | None:
+def first_mention(text: str, aliases: list[str]) -> int | None:
     low = text.lower()
     best: int | None = None
     for alias in aliases:
         if not alias:
             continue
-        m = _alias_pattern(alias).search(low)
+        m = term_pattern(alias).search(low)
         if m and (best is None or m.start() < best):
             best = m.start()
     return best
@@ -233,7 +230,7 @@ def _window_around(text: str, aliases: list[str],
     blob = " ".join((text or "").split())
     if not blob or not aliases:
         return None
-    idx = _first_mention(blob, aliases)
+    idx = first_mention(blob, aliases)
     if idx is None:
         return None
     half = max(limit // 2, 1)
@@ -254,19 +251,19 @@ _INTERACTION_RE = re.compile(
 )
 
 
-def _has_interaction_language(text: str) -> bool:
+def has_interaction_language(text: str) -> bool:
     return bool(_INTERACTION_RE.search(text or ""))
 
 
 def _any_alias_in_blob(aliases: list[str], blob: str) -> bool:
     low = blob or ""
     for alias in aliases:
-        if alias and _alias_pattern(alias).search(low):
+        if alias and term_pattern(alias).search(low):
             return True
     return False
 
 
-def _ingredient_names_from(rec: dict) -> list[str]:
+def ingredient_names_from(rec: dict) -> list[str]:
     """Product ingredients: attached list, or openFDA generic/substance names."""
     attached = rec.get("ingredient_names")
     if attached:
@@ -281,7 +278,7 @@ def _ingredient_names_from(rec: dict) -> list[str]:
     return out
 
 
-def _spl_contains_both_pair_members(
+def spl_contains_both_pair_members(
     ingredient_names: list[str] | None, drug_a: str, drug_b: str,
 ) -> bool:
     """True when this SPL already lists both pair members as ingredients."""
@@ -290,8 +287,8 @@ def _spl_contains_both_pair_members(
         return False
     blob = " ".join(names).lower()
     return (
-        _any_alias_in_blob(_label_aliases(drug_a), blob)
-        and _any_alias_in_blob(_label_aliases(drug_b), blob)
+        _any_alias_in_blob(label_aliases(drug_a), blob)
+        and _any_alias_in_blob(label_aliases(drug_b), blob)
     )
 
 
@@ -336,12 +333,12 @@ _NEGATIVE_INTERACTION_RE = re.compile(
 )
 
 
-def _negative_pair_mention(text: str, aliases: list[str]) -> bool:
+def negative_pair_mention(text: str, aliases: list[str]) -> bool:
     """True when the partner is named in a 'no significant interaction' sentence."""
     low = " ".join((text or "").lower().split())
     if not low:
         return False
-    idx = _first_mention(low, aliases)
+    idx = first_mention(low, aliases)
     if idx is None:
         return False
     start = low.rfind(".", 0, idx) + 1
@@ -354,7 +351,7 @@ def _negative_pair_mention(text: str, aliases: list[str]) -> bool:
     return bool(_NEGATIVE_INTERACTION_RE.search(sent))
 
 
-def _is_ingredient_colist(text: str, aliases: list[str]) -> bool:
+def is_ingredient_colist(text: str, aliases: list[str]) -> bool:
     """True when the partner is named as an ingredient of this product, not a DDI."""
     low = " ".join((text or "").lower().split())
     if not low:
@@ -385,7 +382,7 @@ _CI_WITH_MOD = (
 )
 
 
-def _pair_scoped_contraindication(text: str, aliases: list[str]) -> bool:
+def pair_scoped_contraindication(text: str, aliases: list[str]) -> bool:
     """CI only when the partner is named with with / concomitant / coadminister.
 
     'Do not use … telmisartan' in a hypersensitivity sentence is not CI.
@@ -433,18 +430,18 @@ def _label_hit(rec: dict, subject: str, aliases: list[str],
                _fields: tuple[str, ...] = LABEL_SEARCH_FIELDS) -> dict | None:
     """Window DI and CI/boxed separately. Combo SPLs of both pair drugs are not hits."""
     other = partner or (aliases[0] if aliases else "")
-    ingredients = _ingredient_names_from(rec)
-    if other and _spl_contains_both_pair_members(ingredients, subject, other):
+    ingredients = ingredient_names_from(rec)
+    if other and spl_contains_both_pair_members(ingredients, subject, other):
         return None
     di = _window_around(_join_fields(rec, ("drug_interactions",)), aliases)
     ci = _window_around(
         _join_fields(rec, ("contraindications", "boxed_warning")), aliases)
-    if di and _negative_pair_mention(di, aliases):
+    if di and negative_pair_mention(di, aliases):
         di = None
     if not di and not ci:
         return None
-    contra = _pair_scoped_contraindication(
-        ci or "", aliases) or _pair_scoped_contraindication(di or "", aliases)
+    contra = pair_scoped_contraindication(
+        ci or "", aliases) or pair_scoped_contraindication(di or "", aliases)
     snippet = ci if contra and ci else (di or ci)
     setid = _setid_from_record(rec)
     openfda = rec.get("openfda") or {}
@@ -476,7 +473,7 @@ async def openfda_label_check(drug_a: str, drug_b: str) -> list[dict]:
         for subject, other in ((drug_a, drug_b), (drug_b, drug_a)):
             subject = _clean_term(subject)
             other = _clean_term(other)
-            aliases = _label_aliases(other)
+            aliases = label_aliases(other)
             if not subject or not aliases:
                 continue
             field_q = _field_query(aliases, LABEL_SEARCH_FIELDS)
@@ -496,7 +493,7 @@ async def openfda_label_check(drug_a: str, drug_b: str) -> list[dict]:
                     tool="openfda", params=params)
                 if r.status_code == 404:
                     continue
-                _raise_http(r, "openfda")
+                raise_for_tool_status(r, "openfda")
                 for rec in r.json().get("results", []):
                     row = _label_hit(rec, subject, aliases, partner=other)
                     if not row:
@@ -550,7 +547,7 @@ async def openfda_substance_check(drug: str, terms: list[str]) -> list[dict]:
                 tool="openfda", params=params)
             if r.status_code == 404:
                 return []
-            _raise_http(r, "openfda")
+            raise_for_tool_status(r, "openfda")
             out: list[dict] = []
             for rec in r.json().get("results", []):
                 di = _window_around(
@@ -600,7 +597,7 @@ async def pubmed_search(drug_a: str, drug_b: str, *, retmax: int = 5) -> list[di
                 params={"db": "pubmed", "term": query,
                         "retmax": retmax, "retmode": "json",
                         "sort": "relevance"})
-            _raise_http(r, "pubmed")
+            raise_for_tool_status(r, "pubmed")
             pmids = r.json().get("esearchresult", {}).get("idlist", [])
             if not pmids:
                 return []
@@ -609,7 +606,7 @@ async def pubmed_search(drug_a: str, drug_b: str, *, retmax: int = 5) -> list[di
                 tool="pubmed",
                 params={"db": "pubmed", "id": ",".join(pmids),
                         "retmode": "json"})
-            _raise_http(r2, "pubmed")
+            raise_for_tool_status(r2, "pubmed")
             data = r2.json().get("result", {})
             # Fetch abstracts too — titles alone are not gradeable evidence
             abstracts = await _fetch_abstracts(client, pmids)
@@ -639,7 +636,7 @@ async def _fetch_abstracts(client: httpx.AsyncClient, pmids: list[str]) -> dict[
             tool="pubmed",
             params={"db": "pubmed", "id": ",".join(pmids),
                     "rettype": "abstract", "retmode": "xml"})
-        _raise_http(r, "pubmed")
+        raise_for_tool_status(r, "pubmed")
         out: dict[str, str] = {}
         for article in ET.fromstring(r.text).iter("PubmedArticle"):
             pmid_el = article.find(".//PMID")
@@ -670,7 +667,7 @@ async def clinicaltrials_search(drug_a: str, drug_b: str, *, page_size: int = 5)
                 tool="clinicaltrials",
                 params={"query.term": term, "pageSize": page_size,
                         "fields": "NCTId,BriefTitle,OverallStatus,Phase,StudyType,LeadSponsorName"})
-            _raise_http(r, "clinicaltrials")
+            raise_for_tool_status(r, "clinicaltrials")
             out = []
             for st in r.json().get("studies", []):
                 proto = st.get("protocolSection", {})
@@ -704,7 +701,7 @@ async def web_search(query: str, *, limit: int = 5) -> list[dict]:
                 tool="firecrawl",
                 headers={"Authorization": f"Bearer {settings.firecrawl_api_key}"},
                 json={"query": query, "limit": limit})
-            _raise_http(r, "firecrawl")
+            raise_for_tool_status(r, "firecrawl")
             return [{"title": d.get("title", ""), "url": d.get("url", ""),
                      "snippet": d.get("description", "")}
                     for d in r.json().get("data", [])]
@@ -723,7 +720,7 @@ async def web_fetch(url: str) -> str:
                 tool="firecrawl",
                 headers={"Authorization": f"Bearer {settings.firecrawl_api_key}"},
                 json={"url": url, "formats": ["markdown"], "onlyMainContent": True})
-            _raise_http(r, "firecrawl")
+            raise_for_tool_status(r, "firecrawl")
             return (r.json().get("data", {}).get("markdown") or "")[:6000]
         except httpx.HTTPError:
             return ""

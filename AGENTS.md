@@ -44,9 +44,11 @@ locked product rules live in `PLAN.md`. Keep both in sync when behavior changes.
 │   │   ├── main.py           routes
 │   │   ├── service.py        /api/check orchestrator
 │   │   ├── models.py         request/response contract
+│   │   ├── citations.py      map cited ids → retrieved records (pipeline + agent)
+│   │   ├── textmatch.py      word-boundary drug-name matching
 │   │   ├── config.py         pydantic-settings
 │   │   ├── data/indian_drugs.json   brand → composition(s)
-│   │   ├── pipeline/         deterministic, no LLM
+│   │   ├── pipeline/         deterministic, no LLM — never imports agent LLM code
 │   │   │   ├── ocr.py
 │   │   │   ├── scrubber.py
 │   │   │   ├── normalize.py
@@ -161,10 +163,12 @@ Per name, cap `MAX_DRUGS_PER_REQUEST` (default 15):
    become an FDC; unspecified form prefers tablet/capsule over drops.
 2. Else RxNav `/approximateTerm` → RxCUI + RxNorm name.
 3. Else `agent/web_resolve.py`: Firecrawl search/fetch on the **scrubbed**
-   name (regex PHI only — NER off so unknown brands are not PERSON). The
-   LLM may only return generics that appear in retrieved text.
-   `resolved_via="agent_web"`. Still unresolved if nothing maps.
-   DDI grades still require mapped citations downstream.
+   name (regex PHI only — NER off so unknown brands are not PERSON). Fetched
+   pages are the pool; when no fetch returns, search **snippets** stand in —
+   still retrieved text, never the model's own memory. The LLM may only
+   return generics that appear in that pool. `resolved_via="agent_web"`.
+   Still unresolved if nothing maps. DDI grades still require mapped
+   citations downstream.
 
 `split_components` turns `amoxycillin (500mg) / clavulanic acid (125mg)` into
 `["amoxycillin", "clavulanic acid"]`. Strengths like `(100mg/ml)` are stripped
@@ -229,7 +233,7 @@ Hard rules (also in the synthesizer prompt):
 - Cite **only** records the tools just retrieved. No record → no citation → no graded claim.
 - `verdict` is `interaction` | `none` | `insufficient`. Only `interaction` gets a grade.
 - Human PK / coadministration studies are Grade B when they are the strongest retrieved human evidence (not only RCT-tagged papers).
-- Conflict (case report vs absent/negative trial) → Grade C + `evidence_conflict` (never upgraded to B).
+- Conflict (case report vs absent/negative trial) → Grade C + `evidence_conflict` (never upgraded to B). The disclosure rides on a **positive** tier-3 verdict; a `none`/`insufficient` verdict is never rewritten into a graded interaction.
 - Grade C may `web_fetch` a search URL; unfetched pages are not citations.
 - Unknown dose → conditional `dose_condition` (`DDI possible if … > X mg`).
 - Separable admin (e.g. cations + levothyroxine) → `category=timing`.
@@ -241,13 +245,18 @@ the whole request (`source_tier="error"`). A tool HTTP 429 is retried twice
 with short backoff; if it still fails it is that pair’s error, not “no DDI”,
 and does not abort other pairs. 404 is not retried. Identical component
 pairs reuse a process-local cache (`agent/pair_cache.py`); hits keep the
-same grade. The cache stores graded pair fields only — never patient notes,
-raw Rx text, or error-tier rows.
+same grade. **Patient context bypasses the cache in both directions** — a
+synthesis run with patient notes in the prompt bleeds that patient into
+`summary`, `severe_if`, and `dose_condition`, not just
+`patient_specific_note`, so such a result is never stored, and a request
+carrying context never replays a result graded for nobody. Error-tier rows
+are never cached either.
 
 Non-drugs (alcohol, tobacco, grapefruit, herbals) skip pair-checking. Each is
 looked up on listed drugs’ openFDA `drug_interactions` / `food_interactions`.
-Hits become `AvoidWithItem` rows with citations mapped to retrieved records
-(`pipeline/avoid.py`). No record → honest empty copy (never “pair checking
+Unresolved input names are searched too — they are still medicines on the
+prescription. Hits become `AvoidWithItem` rows with citations mapped to
+retrieved records (`pipeline/avoid.py`). No record → honest empty copy (never “pair checking
 skipped”). No LLM, so herbals are never invented.
 
 ### 7. Alternatives — `agent/alternatives.py` + `POST /api/alternatives`
@@ -263,7 +272,8 @@ scrubbed again).
    candidates. Grade C (case reports / weak evidence) never justifies a swap.
    Timing pairs recommend separation, not a swap.
 3. Adjuvants are always eligible. Controllers only if the pair is major or
-   contraindicated. Anchors only if every partner is also an anchor.
+   contraindicated — **severity**, not grade: a moderate Grade A pair does
+   not unlock a controller. Anchors only if every partner is also an anchor.
 4. LLM proposes ≤2 same-indication substitutes per candidate. It may not
    invent citations or change a drug the ranker rejected.
 5. Each substitute is normalized and rechecked only against leftover
@@ -307,8 +317,9 @@ Defined in `backend/app/main.py` and `models.py`.
 `avoid_with_medications` (`{substance, medications[], note, citations[]}`),
 `insufficient_evidence`, `disclaimer`.
 
-`AlternativesRequest`: `{ normalized_drugs, pairs, patient_context?, avoid_with_medications? }`
-(the graded `/api/check` snapshot).
+`AlternativesRequest`: `{ normalized_drugs, pairs, patient_context?,
+scrubbed_text?, avoid_with_medications? }` (the graded `/api/check`
+snapshot; `scrubbed_text` is already de-identified and is re-scrubbed anyway).
 
 `AlternativesResponse`: `strategy`, `replaceable`, `suggestions`
 (`change_from` → `change_to`, `safer`, leftover `remaining_ddis`),
@@ -395,7 +406,8 @@ shared JSON parse, NormalizedDrug pre-filter shape, settings keys into LiteLLM.
 citations never earn a grade; invented PMIDs never appear.
 
 `backend/tests/test_waterfall_grades.py` — human PK grades B; case report vs
-negative trial is C with `evidence_conflict`; unfetched URLs are not citations.
+negative trial is C with `evidence_conflict`; a tier-3 `none`/`insufficient`
+verdict stays ungraded; unfetched URLs are not citations.
 
 `backend/tests/test_label_grade.py` — pair-scoped openFDA Grade A; combo SPLs
 (Janumet, Synjardy, Twynsta, Micardis HCT, Symbicort, Caduet) are not Grade A;
@@ -415,8 +427,9 @@ scrubbed web verification; invented generics not in the page are dropped;
 already-resolved names skip the web.
 
 `backend/tests/test_pair_cache.py` — identical pairs hunt once; cache hits
-keep the grade; patient notes never enter the cache; a tool 429 errors that
-pair only.
+keep the grade; a context-graded result never enters the cache and a request
+with patient context re-hunts instead of replaying one; a tool 429 errors
+that pair only.
 
 When changing scrub, normalize, web resolve, ranking, overlay, or LLM wiring,
 extend these tests. Do not add tests that need live API keys. The ~30-pair **full live
@@ -427,7 +440,8 @@ see a raw image in v1; its transcript is still scrubbed. Image-level
 redaction is not v1.
 
 Citation invariant: a graded `interaction` must map **every** cited identifier
-back to tool records (`waterfall._citations_from`). Empty or unmapped citations
+back to tool records (`app/citations.py`, shared by the waterfall and
+`pipeline/avoid.py` so the pipeline never imports the LLM waterfall). Empty or unmapped citations
 become `source_tier="insufficient"` (no A/B/C). Invented PMIDs never appear.
 The results screen lists those pairs separately; the alternatives panel shows
 its own disclaimer when open. Avoid-with citations use the same mapper against
@@ -442,6 +456,10 @@ retrieved openFDA records; no mapped citation → empty copy, not a claimed hit.
 - New evidence sources belong in `agent/tools.py` and a waterfall tier — not
   ad-hoc fetches inside the synthesizer prompt.
 - `models.py` is the contract with the frontend. Change `api.ts` in the same PR.
+- Closed vocabularies are enums (`Grade`, `Category`, `SourceTier`), not bare
+  strings. `PairResult.priority()` is the one ordering; `App.tsx:rank` mirrors it.
+- `pipeline/` must not import `agent/llm`, `agent/waterfall`, or anything that
+  pulls litellm in. Shared helpers belong in `app/citations.py` / `app/textmatch.py`.
 - Comments: short, factual, only for non-obvious constraints (PHI guards,
   brand-as-PERSON, early-exit). No changelog comments.
 - Do not add Markdown files the user did not ask for.

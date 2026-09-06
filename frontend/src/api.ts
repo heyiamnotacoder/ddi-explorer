@@ -5,6 +5,15 @@ export interface Citation {
   identifier?: string | null;
 }
 
+export type SourceTier =
+  | "local"
+  | "openfda"
+  | "pubmed_ct"
+  | "web"
+  | "none"
+  | "insufficient"
+  | "error";
+
 export interface PairResult {
   drugs: [string, string];
   grade: "A" | "B" | "C" | null;
@@ -17,7 +26,7 @@ export interface PairResult {
   patient_specific_note?: string | null;
   evidence_conflict?: string | null;
   dose_condition?: string | null;
-  source_tier?: string | null;
+  source_tier?: SourceTier | null;
 }
 
 export interface NormalizedDrug {

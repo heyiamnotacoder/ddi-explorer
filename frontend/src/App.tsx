@@ -9,6 +9,7 @@ import {
   type Citation,
   type Importance,
   type PairResult,
+  type SourceTier,
 } from "./api";
 import {
   clearHistory,
@@ -53,13 +54,13 @@ function pairKey(a: string, b: string) {
   return [a.toLowerCase(), b.toLowerCase()].sort().join("|");
 }
 
+// Mirrors PairResult.priority() in backend/app/models.py.
+const GRADE_ORDER: Record<string, number> = { A: 1, B: 2, C: 3 };
+
 function rank(p: PairResult) {
   if (p.category === "contraindicated") return 0;
-  if (p.grade === "A") return 1;
-  if (p.grade === "B") return 2;
-  if (p.grade === "C") return 3;
-  if (p.category === "timing") return 4;
-  return 5;
+  if (p.grade) return GRADE_ORDER[p.grade];
+  return p.category === "timing" ? 4 : 5;
 }
 
 function GradePill({
@@ -69,7 +70,7 @@ function GradePill({
 }: {
   grade: string | null;
   category?: string;
-  sourceTier?: string | null;
+  sourceTier?: SourceTier | null;
 }) {
   if (sourceTier === "insufficient") return <span className="pill insuff">INSUFF</span>;
   if (category === "contraindicated") {

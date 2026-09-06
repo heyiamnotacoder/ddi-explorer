@@ -5,11 +5,8 @@ import json
 
 import pytest
 
-from app.agent.waterfall import (
-    _citations_from,
-    _verdict_result,
-    evaluate_pair,
-)
+from app.agent.waterfall import _verdict_result, evaluate_pair
+from app.citations import citations_from
 from app.models import Category, Grade
 from app.service import DISCLAIMER
 
@@ -46,7 +43,7 @@ def _synth(**over):
 
 
 def test_invented_pmid_never_appears_as_citation():
-    cites = _citations_from(["99999", "12345"], POOL, "pubmed")
+    cites = citations_from(["99999", "12345"], POOL, "pubmed")
     assert [c.identifier for c in cites] == ["12345"]
     assert all(c.identifier != "99999" for c in cites)
 
@@ -63,7 +60,7 @@ def test_empty_mapped_citations_no_grade():
 
 def test_invented_only_citations_no_grade():
     s = _synth(cited=["99999"])
-    cites = _citations_from(s["cited"], POOL, "pubmed")
+    cites = citations_from(s["cited"], POOL, "pubmed")
     result = _verdict_result(
         "warfarin", "omeprazole", s, Grade.B, cites, "pubmed_ct", pool=POOL,
     )
@@ -78,7 +75,7 @@ def test_invented_only_citations_no_grade():
 
 def test_partial_unmapped_cited_ids_no_grade():
     s = _synth(cited=["12345", "99999"])
-    cites = _citations_from(s["cited"], POOL, "pubmed")
+    cites = citations_from(s["cited"], POOL, "pubmed")
     result = _verdict_result(
         "warfarin", "omeprazole", s, Grade.A, cites, "openfda", pool=POOL,
     )
@@ -90,7 +87,7 @@ def test_partial_unmapped_cited_ids_no_grade():
 
 def test_mapped_citations_keep_grade():
     s = _synth(cited=["12345"])
-    cites = _citations_from(s["cited"], POOL, "pubmed")
+    cites = citations_from(s["cited"], POOL, "pubmed")
     result = _verdict_result(
         "warfarin", "omeprazole", s, Grade.A, cites, "openfda", pool=POOL,
     )
@@ -102,7 +99,7 @@ def test_mapped_citations_keep_grade():
 
 def test_none_verdict_never_graded():
     s = _synth(verdict="none", cited=["12345"], summary="No interaction.")
-    cites = _citations_from(s["cited"], POOL, "pubmed")
+    cites = citations_from(s["cited"], POOL, "pubmed")
     result = _verdict_result(
         "warfarin", "omeprazole", s, Grade.A, cites, "openfda", pool=POOL,
     )

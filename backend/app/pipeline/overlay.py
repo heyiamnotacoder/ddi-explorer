@@ -9,7 +9,15 @@ from __future__ import annotations
 
 import re
 
-from ..models import Category, Grade, NormalizedDrug, PairResult
+from ..models import (
+    Category,
+    Grade,
+    NormalizedDrug,
+    PairResult,
+    SourceTier,
+    parent_drug,
+)
+from ..textmatch import has_word
 
 # Absorption / chelation: separate administration instead of swapping.
 _SEPARABLE = (
@@ -72,7 +80,8 @@ def apply(
     """Fill overlay fields on local/openFDA Grade A pairs. Other pairs pass through."""
     out: list[PairResult] = []
     for p in pairs:
-        if p.grade == Grade.A and p.source_tier in ("local", "openfda"):
+        if p.grade == Grade.A and p.source_tier in (
+                SourceTier.LOCAL, SourceTier.OPENFDA):
             out.append(_overlay_one(p, drugs, patient_ctx))
         else:
             out.append(p)
@@ -99,31 +108,16 @@ def _overlay_one(
     return p.model_copy(update=updates)
 
 
-def _has_token(name: str, tokens: tuple[str, ...]) -> bool:
-    n = name.lower()
-    return any(re.search(rf"\b{re.escape(t)}\b", n) for t in tokens)
-
-
 def _is_timing_separable(p: PairResult) -> bool:
     a, b = p.drugs[0].lower(), p.drugs[1].lower()
-    a_sep, b_sep = _has_token(a, _SEPARABLE), _has_token(b, _SEPARABLE)
-    a_bind, b_bind = _has_token(a, _BINDERS), _has_token(b, _BINDERS)
+    a_sep, b_sep = has_word(a, _SEPARABLE), has_word(b, _SEPARABLE)
+    a_bind, b_bind = has_word(a, _BINDERS), has_word(b, _BINDERS)
     if (a_sep and b_bind) or (b_sep and a_bind):
         return True
     blob = (p.summary or "").lower()
     if not any(k in blob for k in _TIMING_KEYS):
         return False
     return a_sep or b_sep or a_bind or b_bind
-
-
-def _parent(component: str, drugs: list[NormalizedDrug]) -> NormalizedDrug | None:
-    c = component.lower()
-    for d in drugs:
-        if any(x.lower() == c for x in d.components):
-            return d
-        if d.generic_name and d.generic_name.lower() == c:
-            return d
-    return None
 
 
 def _has_numeric_dose(dose: str | None) -> bool:
@@ -138,34 +132,40 @@ def _condition_copy(victim: str, threshold: str) -> str:
 
 def _pair_hits(a: str, b: str, left: tuple[str, ...], right: tuple[str, ...]) -> bool:
     return (
-        (_has_token(a, left) and _has_token(b, right))
-        or (_has_token(b, left) and _has_token(a, right))
+        (has_word(a, left) and has_word(b, right))
+        or (has_word(b, left) and has_word(a, right))
     )
+
+
+def _without_numeric_dose(
+    p: PairResult, drugs: list[NormalizedDrug],
+) -> list[str]:
+    """Pair members whose input product carried no numeric dose."""
+    out = []
+    for name in p.drugs:
+        parent = parent_drug(drugs, name)
+        if not (parent and _has_numeric_dose(parent.dose)):
+            out.append(name)
+    return out
 
 
 def _dose_condition(p: PairResult, drugs: list[NormalizedDrug]) -> str | None:
     a, b = p.drugs[0], p.drugs[1]
     for left, right, victim, thresh in _DOSE_RULES:
         if _pair_hits(a.lower(), b.lower(), left, right):
-            parent = _parent(victim, drugs)
+            parent = parent_drug(drugs, victim)
             if parent and _has_numeric_dose(parent.dose):
                 return None
             return _condition_copy(victim, thresh)
     blob = p.summary or ""
     m = _THRESHOLD.search(blob) or _MAX_DOSE.search(blob)
     if m:
-        missing = [
-            name for name in p.drugs
-            if not (_parent(name, drugs) and _has_numeric_dose(_parent(name, drugs).dose))
-        ]
+        missing = _without_numeric_dose(p, drugs)
         if missing:
             return _condition_copy(missing[0], m.group(1))
         return None
     if "high dose" in blob.lower() or "dose-dependent" in blob.lower():
-        missing = [
-            name for name in p.drugs
-            if not (_parent(name, drugs) and _has_numeric_dose(_parent(name, drugs).dose))
-        ]
+        missing = _without_numeric_dose(p, drugs)
         if missing:
             return (
                 f"DDI possible if {missing[0]} dose is high; "

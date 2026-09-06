@@ -17,6 +17,7 @@ from ..config import get_settings
 from ..models import NormalizedDrug
 from ..pipeline import normalize as norm
 from ..pipeline import scrubber
+from ..textmatch import contains_term
 from . import llm, tools
 
 _MAX_FETCH = 2
@@ -53,11 +54,7 @@ def _mentioned(name: str, blob: str) -> bool:
     token = " ".join(name.lower().split())
     if len(token) < 3:
         return False
-    return bool(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", blob))
-
-
-async def _fetched(hits: list[dict]) -> list[dict]:
-    return await tools.fetch_web_pages(hits, _MAX_FETCH)
+    return contains_term(blob, token)
 
 
 def _generics_from(parsed: dict, blob: str) -> list[str]:
@@ -82,7 +79,7 @@ async def resolve_one(raw: str) -> NormalizedDrug | None:
     if len(query) < 3:
         return None
     hits = await tools.web_search(f"{query} tablet composition generic ingredients")
-    pool = await _fetched(hits)
+    pool = await tools.fetch_web_pages(hits, _MAX_FETCH)
     if not pool:
         # Snippets only when a fetch returned nothing — still retrieved text.
         pool = [
@@ -111,10 +108,10 @@ async def resolve_one(raw: str) -> NormalizedDrug | None:
     comps = _generics_from(parsed, blob)
     if not comps:
         return None
-    if all(norm._bare_name(c) == norm._bare_name(query) for c in comps):
+    if all(norm.bare_name(c) == norm.bare_name(query) for c in comps):
         return None
     async with httpx.AsyncClient() as client:
-        cuis = await norm._rxcuis_for_components(client, comps)
+        cuis = await norm.rxcuis_for_components(client, comps)
     rxcui = next((cuis[c] for c in comps if c in cuis), None)
     return NormalizedDrug(
         input_name=raw,

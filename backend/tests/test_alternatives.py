@@ -159,3 +159,12 @@ def test_same_grade_a_is_not_safer():
 def test_fallback_explains_timing_only():
     text = fallback_strategy([], ["Keep levothyroxine and calcium; separate."])
     assert "separating" in text.lower()
+
+
+def test_moderate_grade_a_does_not_make_a_controller_replaceable():
+    """Grade A is evidence strength, not severity. Only major/contra unlocks."""
+    drugs = [_drug("Warfarin 5", "warfarin"), _drug("Telma 40", "telmisartan")]
+    moderate = [_pair("warfarin", "telmisartan", grade=Grade.A, severity="moderate")]
+    assert pick_candidates(drugs, moderate) == []
+    major = [_pair("warfarin", "telmisartan", grade=Grade.A, severity="major")]
+    assert [c.name for c in pick_candidates(drugs, major)] == ["telmisartan"]

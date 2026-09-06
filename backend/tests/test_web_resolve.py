@@ -45,7 +45,7 @@ async def test_dataset_rxnav_miss_resolves_via_web(monkeypatch):
     monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
     monkeypatch.setattr(web_resolve.tools, "web_fetch", fake_fetch)
     monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
-    monkeypatch.setattr(web_resolve.norm, "_rxcuis_for_components", _no_rxcui)
+    monkeypatch.setattr(web_resolve.norm, "rxcuis_for_components", _no_rxcui)
 
     out, still = await web_resolve.apply([_miss("Telmafoo 40")])
     assert still == []
@@ -75,7 +75,7 @@ async def test_invented_generic_not_in_page_is_dropped(monkeypatch):
     monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
     monkeypatch.setattr(web_resolve.tools, "web_fetch", fake_fetch)
     monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
-    monkeypatch.setattr(web_resolve.norm, "_rxcuis_for_components", _no_rxcui)
+    monkeypatch.setattr(web_resolve.norm, "rxcuis_for_components", _no_rxcui)
 
     out, still = await web_resolve.apply([_miss("BrandX")])
     assert still == []
@@ -171,7 +171,7 @@ async def test_keeps_dose_schedule_on_web_hit(monkeypatch):
     monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
     monkeypatch.setattr(web_resolve.tools, "web_fetch", fake_fetch)
     monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
-    monkeypatch.setattr(web_resolve.norm, "_rxcuis_for_components", _no_rxcui)
+    monkeypatch.setattr(web_resolve.norm, "rxcuis_for_components", _no_rxcui)
 
     out, still = await web_resolve.apply([
         _miss("Amlongfoo", dose="5 mg", schedule="1-0-0"),
@@ -233,7 +233,7 @@ async def test_check_web_resolved_name_enters_prefilter_not_unresolved(monkeypat
     monkeypatch.setattr(web_resolve.tools, "web_search", fake_search)
     monkeypatch.setattr(web_resolve.tools, "web_fetch", fake_fetch)
     monkeypatch.setattr(web_resolve.llm, "complete", fake_complete)
-    monkeypatch.setattr(web_resolve.norm, "_rxcuis_for_components", _no_rxcui)
+    monkeypatch.setattr(web_resolve.norm, "rxcuis_for_components", _no_rxcui)
     patch_seams(extract=fake_extract, normalize=fake_norm,
                 prefilter=fake_prefilter, waterfall=fake_waterfall,
                 avoid=fake_avoid)

@@ -51,7 +51,7 @@ _STRENGTH_RE = re.compile(
 _COMBO_RE = re.compile(r"\s*/\s*|\s+\+\s+")
 
 
-def _bare_name(name: str) -> str:
+def bare_name(name: str) -> str:
     s = name.lower().strip()
     s = _STRENGTH_RE.sub(" ", s)
     return re.sub(r"\s+", " ", s).strip(" ,;/-")
@@ -66,7 +66,7 @@ def _is_combo_name(s: str) -> bool:
 # Format: {"augmentin 625 duo tablet": ["amoxycillin", "clavulanic acid"], ...}
 # ---------------------------------------------------------------------------
 @lru_cache
-def _indian_index() -> dict[str, list[str]]:
+def indian_index() -> dict[str, list[str]]:
     if not DATA_PATH.exists():
         return {}
     with open(DATA_PATH, encoding="utf-8") as f:
@@ -93,7 +93,7 @@ def _pick_brand(hits: list[str], index: dict[str, list[str]], query: str) -> str
 def _known_generics() -> frozenset[str]:
     """Generic names that appear as Indian-dataset components."""
     out: set[str] = set()
-    for comps in _indian_index().values():
+    for comps in indian_index().values():
         for raw in comps:
             for part in split_components(raw):
                 if len(part) >= 4:
@@ -132,7 +132,7 @@ def _lookup_indian(name: str) -> list[str] | None:
     so a dose does not match an FDC partner's mg or kill RxNav later.
     Unitless brand numbers ('dolo 650') stay on the full string.
     """
-    index = _indian_index()
+    index = indian_index()
     if not index:
         return None
     key = name.lower().strip()
@@ -147,7 +147,7 @@ def _lookup_indian(name: str) -> list[str] | None:
     # typed name is already a generic (e.g. 'amlodipine') — do not fuzzy an FDC.
     # Also try the dose-stripped form so 'amlodipine 20mg' stays a singleton.
     generics = _known_generics()
-    bare = _bare_name(key)
+    bare = bare_name(key)
     for token in (key, bare):
         hit = _generic_hit(token, generics)
         if hit:
@@ -184,9 +184,8 @@ def _pick_rxnav_candidate(
 ) -> tuple[str, str] | None:
     """Prefer a named non-combo ingredient when the query is a single drug.
 
-    `rows` are (rxcui, rxnorm_name, score). Nameless hits are skipped — some
-    approximateTerm RxCUIs have no RxNorm Name and used to fail the whole
-    resolve (e.g. 'warfar 100 mg').
+    `rows` are (rxcui, rxnorm_name, score). An approximateTerm RxCUI with no
+    RxNorm Name cannot be displayed or paired, so nameless hits are skipped.
     """
     named = [(cui, n, s) for cui, n, s in rows if cui and n]
     if not named:
@@ -200,7 +199,7 @@ def _pick_rxnav_candidate(
     return best[0], best[1]
 
 
-async def _rxcuis_for_components(
+async def rxcuis_for_components(
     client: httpx.AsyncClient, names: list[str],
 ) -> dict[str, str]:
     """One RxCUI per ingredient. Never copy the first component's id onto the rest."""
@@ -222,7 +221,7 @@ async def _rxnav_resolve(client: httpx.AsyncClient, name: str) -> tuple[str | No
     the query itself looks like a combination.
     """
     terms: list[str] = []
-    for t in (_bare_name(name), name.strip()):
+    for t in (bare_name(name), name.strip()):
         if t and t.lower() not in {x.lower() for x in terms}:
             terms.append(t)
     try:
@@ -271,7 +270,7 @@ def split_components(generic_string: str) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
     for p in parts:
-        p = re.sub(r"\b\d+(\.\d+)?\s*(mg|mcg|ug|µg|g|gm|ml|iu|i\.u\.?|%)\b", " ", p)
+        p = _STRENGTH_RE.sub(" ", p)
         p = re.sub(r"\b(tablet|tablets|capsule|capsules|injection|syrup|cream|ointment|drops?|solution|suspension|oral)\b", " ", p)
         p = re.sub(r"\s+", " ", p).strip("() -.")
         if not p or p in _JUNK or len(p) < 3:
@@ -296,7 +295,7 @@ async def _resolve_one(client: httpx.AsyncClient, raw: str) -> NormalizedDrug:
                     flat.append(c)
         if not flat:
             return NormalizedDrug(input_name=raw, resolved_via=None)
-        cuis = await _rxcuis_for_components(client, flat)
+        cuis = await rxcuis_for_components(client, flat)
         rxcui = next((cuis[c] for c in flat if c in cuis), None)
         return NormalizedDrug(
             input_name=raw, generic_name=", ".join(flat),
@@ -310,7 +309,7 @@ async def _resolve_one(client: httpx.AsyncClient, raw: str) -> NormalizedDrug:
         if len(comps) <= 1:
             cuis = {comps[0]: rxcui} if comps and rxcui else {}
         else:
-            cuis = await _rxcuis_for_components(client, comps)
+            cuis = await rxcuis_for_components(client, comps)
             rxcui = next((cuis[c] for c in comps if c in cuis), rxcui)
         return NormalizedDrug(
             input_name=raw, generic_name=generic.lower(),

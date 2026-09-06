@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import inspect
+import os
+import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -25,6 +29,29 @@ def test_avoid_does_not_import_llm():
     src = inspect.getsource(avoid)
     assert "litellm" not in src
     assert "complete(" not in src
+
+
+def test_pipeline_import_does_not_pull_in_the_llm(tmp_path):
+    """`pipeline/` is the deterministic half. A transitive import of the
+    waterfall would drag litellm in, which the source grep above misses."""
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import sys\n"
+        "import app.pipeline.avoid\n"
+        "import app.pipeline.overlay\n"
+        "import app.pipeline.prefilter\n"
+        "import app.pipeline.normalize\n"
+        "import app.pipeline.scrubber\n"
+        "leaked = [m for m in ('litellm', 'app.agent.waterfall', 'app.agent.llm')\n"
+        "          if m in sys.modules]\n"
+        "assert not leaked, leaked\n"
+    )
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    env = {**os.environ, "PYTHONPATH": str(backend)}
+    r = subprocess.run(
+        [sys.executable, str(probe)], cwd=backend,
+        capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
 
 
 def test_empty_copy_is_honest():
