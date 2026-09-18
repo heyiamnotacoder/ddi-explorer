@@ -184,7 +184,9 @@ A **Suggest safer alternatives** button under the pair results runs the
 second loop: change the lowest-importance interacting drug (adjuvant
 before controller before anchor); timing pairs stay on a schedule.
 Grade C pairs never justify a substitution.
-CORS allows `http://localhost:5173` only.
+CORS allows `CORS_ORIGINS` (default `http://localhost:5173`) plus
+`CORS_ORIGIN_REGEX` (default Vercel hosts). Production split: Render API +
+Vercel React (`VITE_API_URL`).
 
 ---
 

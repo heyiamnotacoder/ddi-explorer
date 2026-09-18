@@ -58,13 +58,28 @@ export interface CheckResponse {
   disclaimer: string;
 }
 
+const API_BASE = String(import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`API error ${r.status}`);
+  if (!r.ok) {
+    let detail = "";
+    try {
+      const body = (await r.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = `: ${body.detail}`;
+    } catch {
+      /* ignore non-JSON error bodies */
+    }
+    throw new Error(`API error ${r.status}${detail}`);
+  }
   return r.json() as Promise<T>;
 }
 
@@ -74,7 +89,7 @@ export async function checkInteractions(body: {
   patient_context?: string;
   timing?: string;
 }): Promise<CheckResponse> {
-  return postJson<CheckResponse>("/api/check", body);
+  return postJson<CheckResponse>(apiUrl("/api/check"), body);
 }
 
 export type Importance = "anchor" | "controller" | "adjuvant";
@@ -116,5 +131,5 @@ export async function suggestAlternatives(body: {
   scrubbed_text?: string;
   avoid_with_medications?: AvoidWithItem[];
 }): Promise<AlternativesResponse> {
-  return postJson<AlternativesResponse>("/api/alternatives", body);
+  return postJson<AlternativesResponse>(apiUrl("/api/alternatives"), body);
 }

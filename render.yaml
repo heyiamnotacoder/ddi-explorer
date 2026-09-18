@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: ddi-explorer-api
+    runtime: python
+    plan: starter
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && python -m spacy download en_core_web_sm
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      - key: SPACY_MODEL
+        value: en_core_web_sm
+      - key: CORS_ORIGINS
+        value: http://localhost:5173
+      - key: CORS_ORIGIN_REGEX
+        value: https://.*\.vercel\.app
+      - key: LLM_MODEL
+        value: anthropic/claude-sonnet-5
+      - key: VISION_MODEL
+        value: anthropic/claude-sonnet-5
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: OPENFDA_API_KEY
+        sync: false

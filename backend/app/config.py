@@ -1,5 +1,4 @@
 """Central configuration. Everything env-driven, provider-agnostic."""
-from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,7 +40,24 @@ class Settings(BaseSettings):
     pair_concurrency: int = 5
     http_timeout: float = 30.0
 
+    # CORS: comma-separated exact origins. Regex covers Vercel preview URLs.
+    cors_origins: str = "http://localhost:5173"
+    cors_origin_regex: str | None = r"https://.*\.vercel\.app"
 
-@lru_cache
+    # Presidio NER model. Render free/starter RAM cannot load en_core_web_lg.
+    spacy_model: str = "en_core_web_lg"
+
+
+_cached: Settings | None = None
+_cached_mtime: float | None = None
+
+
 def get_settings() -> Settings:
-    return Settings()
+    """Re-read backend/.env when it changes. uvicorn --reload does not watch it."""
+    global _cached, _cached_mtime
+    env_path = _BACKEND_ROOT / ".env"
+    mtime = env_path.stat().st_mtime if env_path.exists() else None
+    if _cached is None or mtime != _cached_mtime:
+        _cached = Settings()
+        _cached_mtime = mtime
+    return _cached

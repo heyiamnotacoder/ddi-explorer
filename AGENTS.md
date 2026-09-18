@@ -329,7 +329,9 @@ Frontend: one screen in `frontend/src/App.tsx`. Submit disabled until there is
 text or an image. Results sort contraindicated → A → B → C. A **pair matrix**
 (component × component) sits with the pair cards. Up to five scrubbed checks
 live in `localStorage` (`history.ts`); the clinician can clear them. CORS
-allows `http://localhost:5173` only.
+allows `CORS_ORIGINS` (default `http://localhost:5173`) plus
+`CORS_ORIGIN_REGEX` (default Vercel `*.vercel.app`). Production: backend on
+Render, frontend on Vercel (`VITE_API_URL` = Render origin).
 
 ---
 
@@ -349,6 +351,9 @@ allows `http://localhost:5173` only.
 | `MAX_DRUGS_PER_REQUEST` | default 15 |
 | `PAIR_CONCURRENCY` | default 5 |
 | `HTTP_TIMEOUT` | default 30s |
+| `CORS_ORIGINS` | comma-separated exact origins (default Vite) |
+| `CORS_ORIGIN_REGEX` | extra origin regex (default `https://.*\.vercel\.app`) |
+| `SPACY_MODEL` | Presidio NER (default `en_core_web_lg`; Render uses `en_core_web_sm`) |
 
 **Never commit `backend/.env`.** Only `.env.example` (placeholders) is in git.
 

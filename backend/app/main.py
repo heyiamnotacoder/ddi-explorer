@@ -1,7 +1,10 @@
 """FastAPI entrypoint."""
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from .agent.llm import LLMConfigError
+from .config import get_settings
 from .models import (
     AlternativesRequest,
     AlternativesResponse,
@@ -14,12 +17,19 @@ from .service import run_alternatives, run_check
 
 app = FastAPI(title="DDI Explorer", version="0.1.0")
 
+_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite dev server
+    allow_origins=[o.strip() for o in _settings.cors_origins.split(",") if o.strip()],
+    allow_origin_regex=_settings.cors_origin_regex or None,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(LLMConfigError)
+async def llm_config_error(_request: Request, exc: LLMConfigError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.get("/api/health")

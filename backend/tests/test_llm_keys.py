@@ -41,6 +41,17 @@ def test_settings_read_backend_dotenv_path():
     assert env_file.parent.name == "backend"
 
 
+def test_get_settings_rereads_when_env_mtime_changes(monkeypatch):
+    from app import config
+
+    first = config.Settings()
+    config._cached = first
+    config._cached_mtime = -1.0
+    second = config.get_settings()
+    assert second is not first
+    assert config._cached is second
+
+
 def test_auth_kwargs_maps_provider_keys():
     s = _settings(
         deepseek_api_key="sk-ds",
@@ -92,6 +103,21 @@ async def test_complete_missing_key_does_not_call_vendor(monkeypatch):
     with pytest.raises(llm.LLMConfigError, match="backend/.env"):
         await llm.complete([{"role": "user", "content": "hi"}])
     assert called == []
+
+
+@pytest.mark.asyncio
+async def test_complete_maps_auth_error_to_config_error(monkeypatch):
+    monkeypatch.setattr(llm, "get_settings", lambda: _settings())
+
+    class AuthenticationError(Exception):
+        pass
+
+    async def fake_acompletion(**kwargs):
+        raise AuthenticationError('{"type":"error","error":{"type":"authentication_error"}}')
+
+    monkeypatch.setattr(llm.litellm, "acompletion", fake_acompletion)
+    with pytest.raises(llm.LLMConfigError, match="ANTHROPIC_API_KEY"):
+        await llm.complete([{"role": "user", "content": "hi"}])
 
 
 @pytest.mark.asyncio

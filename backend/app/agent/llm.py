@@ -96,7 +96,16 @@ async def complete(messages: list[dict], *, model: str | None = None,
     }
     if response_format:
         kwargs["response_format"] = response_format
-    resp = await litellm.acompletion(**kwargs)
+    try:
+        resp = await litellm.acompletion(**kwargs)
+    except Exception as e:
+        if type(e).__name__ == "AuthenticationError" or "authentication" in str(e).lower():
+            env_name, _ = _provider_key(chosen, settings)
+            raise LLMConfigError(
+                f"Provider rejected the API key for {chosen}. "
+                f"Update {env_name or 'the provider key'} in backend/.env and retry."
+            ) from e
+        raise
     return resp.choices[0].message.content or ""
 
 
@@ -105,11 +114,21 @@ async def complete_vision(prompt: str, image_data_urls: list[str]) -> str:
     settings = get_settings()
     content: list[dict] = [{"type": "text", "text": prompt}]
     content += [{"type": "image_url", "image_url": {"url": u}} for u in image_data_urls]
-    resp = await litellm.acompletion(
-        model=settings.vision_model,
-        messages=[{"role": "user", "content": content}],
-        temperature=0.0,
-        max_tokens=3000,
-        **_auth_kwargs(settings.vision_model, settings),
-    )
+    chosen = settings.vision_model
+    try:
+        resp = await litellm.acompletion(
+            model=chosen,
+            messages=[{"role": "user", "content": content}],
+            temperature=0.0,
+            max_tokens=3000,
+            **_auth_kwargs(chosen, settings),
+        )
+    except Exception as e:
+        if type(e).__name__ == "AuthenticationError" or "authentication" in str(e).lower():
+            env_name, _ = _provider_key(chosen, settings)
+            raise LLMConfigError(
+                f"Provider rejected the API key for {chosen}. "
+                f"Update {env_name or 'the provider key'} in backend/.env and retry."
+            ) from e
+        raise
     return resp.choices[0].message.content or ""

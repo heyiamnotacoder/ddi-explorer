@@ -54,9 +54,19 @@ class _PresidioBackend:
     def get(cls):
         if cls._analyzer is None:
             from presidio_analyzer import AnalyzerEngine
+            from presidio_analyzer.nlp_engine import NlpEngineProvider
             from presidio_anonymizer import AnonymizerEngine
 
-            cls._analyzer = AnalyzerEngine()
+            from app.config import get_settings
+
+            model = get_settings().spacy_model
+            nlp_engine = NlpEngineProvider(
+                nlp_configuration={
+                    "nlp_engine_name": "spacy",
+                    "models": [{"lang_code": "en", "model_name": model}],
+                }
+            ).create_engine()
+            cls._analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
             cls._anonymizer = AnonymizerEngine()
         return cls._analyzer, cls._anonymizer
 
