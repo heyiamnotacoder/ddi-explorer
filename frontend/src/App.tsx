@@ -388,7 +388,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <div className="mark" aria-hidden>D×D</div>
+          <img className="mark" src="/favicon.svg" width={42} height={42} alt="" />
           <div>
             <h1>DDI Explorer</h1>
             <p className="lede">Evidence-graded drug–drug interaction check for clinicians</p>

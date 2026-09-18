@@ -69,15 +69,8 @@ a:hover { color: var(--copper); }
   width: 42px;
   height: 42px;
   border-radius: 10px;
-  background: var(--forest);
-  color: #f4efe3;
-  display: grid;
-  place-items: center;
-  font-family: var(--serif);
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.03em;
   flex-shrink: 0;
+  display: block;
 }
 
 .brand h1 {
