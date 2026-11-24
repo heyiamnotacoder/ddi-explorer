@@ -697,14 +697,15 @@ async def web_search(query: str, *, limit: int = 5) -> list[dict]:
     async with _client() as client:
         try:
             r = await request_with_retry(
-                client, "POST", "https://api.firecrawl.dev/v1/search",
+                client, "POST", "https://api.firecrawl.dev/v2/search",
                 tool="firecrawl",
                 headers={"Authorization": f"Bearer {settings.firecrawl_api_key}"},
                 json={"query": query, "limit": limit})
             raise_for_tool_status(r, "firecrawl")
+            web = (r.json().get("data") or {}).get("web") or []
             return [{"title": d.get("title", ""), "url": d.get("url", ""),
                      "snippet": d.get("description", "")}
-                    for d in r.json().get("data", [])]
+                    for d in web]
         except httpx.HTTPError:
             return []
 
@@ -716,12 +717,12 @@ async def web_fetch(url: str) -> str:
     async with _client() as client:
         try:
             r = await request_with_retry(
-                client, "POST", "https://api.firecrawl.dev/v1/scrape",
+                client, "POST", "https://api.firecrawl.dev/v2/scrape",
                 tool="firecrawl",
                 headers={"Authorization": f"Bearer {settings.firecrawl_api_key}"},
                 json={"url": url, "formats": ["markdown"], "onlyMainContent": True})
             raise_for_tool_status(r, "firecrawl")
-            return (r.json().get("data", {}).get("markdown") or "")[:6000]
+            return ((r.json().get("data") or {}).get("markdown") or "")[:6000]
         except httpx.HTTPError:
             return ""
 
